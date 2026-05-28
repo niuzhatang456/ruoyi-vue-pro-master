@@ -7,6 +7,8 @@ import { CACHE_KEY, useCache } from '@/hooks/web/useCache'
 
 const { wsCache } = useCache()
 
+const jijianMenuRouteNames = ['JijianInput', 'JijianQuery', 'JijianMe']
+
 export interface PermissionState {
   routers: AppRouteRecordRaw[]
   addRouters: AppRouteRecordRaw[]
@@ -55,7 +57,9 @@ export const usePermissionStore = defineStore('permission', {
           }
         ])
         // 渲染菜单的所有路由
-        this.routers = cloneDeep(remainingRouter).concat(routerMap)
+        this.routers = cloneDeep(remainingRouter).filter((route) =>
+          jijianMenuRouteNames.includes(route.name as string)
+        )
         resolve()
       })
     },

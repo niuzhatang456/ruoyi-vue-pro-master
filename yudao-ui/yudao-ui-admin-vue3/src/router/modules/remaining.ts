@@ -53,9 +53,11 @@ const remainingRouter: AppRouteRecordRaw[] = [
   {
     path: '/',
     component: Layout,
-    redirect: '/index',
+    redirect: '/input/ocr',
     name: 'Home',
-    meta: {},
+    meta: {
+      hidden: true
+    },
     children: [
       {
         path: 'index',
@@ -66,6 +68,117 @@ const remainingRouter: AppRouteRecordRaw[] = [
           icon: 'ep:home-filled',
           noCache: false,
           affix: true
+        }
+      }
+    ]
+  },
+  {
+    path: '/input',
+    component: Layout,
+    redirect: '/input/ocr',
+    name: 'JijianInput',
+    meta: {
+      title: '录入',
+      icon: 'ep:upload',
+      alwaysShow: true
+    },
+    children: [
+      {
+        path: 'ocr',
+        component: () => import('@/views/jijian/input/Ocr.vue'),
+        name: 'JijianInputOcr',
+        meta: {
+          title: '图片/文件识别录入',
+          icon: 'ep:picture'
+        }
+      },
+      {
+        path: 'excel',
+        component: () => import('@/views/jijian/input/Excel.vue'),
+        name: 'JijianInputExcel',
+        meta: {
+          title: 'Excel录入',
+          icon: 'ep:document'
+        }
+      },
+      {
+        path: 'drag',
+        component: () => import('@/views/jijian/input/Drag.vue'),
+        name: 'JijianInputDrag',
+        meta: {
+          title: '拖拽录入',
+          icon: 'ep:folder-add'
+        }
+      }
+    ]
+  },
+  {
+    path: '/query',
+    component: Layout,
+    redirect: '/query/smart',
+    name: 'JijianQuery',
+    meta: {
+      title: '查询模块',
+      icon: 'ep:search',
+      alwaysShow: true
+    },
+    children: [
+      {
+        path: 'smart',
+        component: () => import('@/views/jijian/query/Smart.vue'),
+        name: 'JijianQuerySmart',
+        meta: {
+          title: '智能查询',
+          icon: 'ep:chat-dot-round'
+        }
+      }
+    ]
+  },
+  {
+    path: '/me',
+    component: Layout,
+    redirect: '/me/history',
+    name: 'JijianMe',
+    meta: {
+      title: '我的',
+      icon: 'ep:user',
+      alwaysShow: true
+    },
+    children: [
+      {
+        path: 'history',
+        component: () => import('@/views/jijian/me/History.vue'),
+        name: 'JijianMeHistory',
+        meta: {
+          title: '历史查询对话',
+          icon: 'ep:clock'
+        }
+      },
+      {
+        path: 'favorites',
+        component: () => import('@/views/jijian/me/Favorites.vue'),
+        name: 'JijianMeFavorites',
+        meta: {
+          title: '常用查询内容',
+          icon: 'ep:star'
+        }
+      },
+      {
+        path: 'account',
+        component: () => import('@/views/jijian/me/Account.vue'),
+        name: 'JijianMeAccount',
+        meta: {
+          title: '当前账号信息',
+          icon: 'ep:user-filled'
+        }
+      },
+      {
+        path: 'imports',
+        component: () => import('@/views/jijian/me/Imports.vue'),
+        name: 'JijianMeImports',
+        meta: {
+          title: '最近导入记录',
+          icon: 'ep:files'
         }
       }
     ]
