@@ -66,7 +66,7 @@ spring:
           #          password: Yudao@2024 # OpenGauss 连接的示例
         slave: # 模拟从库，可根据自己需要修改
           lazy: true # 开启懒加载，保证启动速度
-          url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&nullCatalogMeansCurrent=true
+          url: jdbc:mysql://127.0.0.1:3306/ruoyi_vue_pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&nullCatalogMeansCurrent=true
           username: root
           password: 123456
 #        tdengine: # IoT 数据库（需要 IoT 物联网再开启噢！）
@@ -279,3 +279,17 @@ justauth:
     type: REDIS
     prefix: 'social_auth_state:' # 缓存前缀，目前只对 Redis 缓存生效，默认 JUSTAUTH::STATE::
     timeout: 24h # 超时时长，目前只对 Redis 缓存生效，默认 3 分钟
+# 纪检模块配置
+jijian:
+  ocr:
+    enabled: true                           # true=启用OCR; false=图片/PDF返回友好提示
+    provider: paddleocr
+    endpoint: http://127.0.0.1:8868/ocr    # OCR识别端点
+    health-endpoint: http://127.0.0.1:8868/health  # 健康检查端点
+    timeout-seconds: 60
+    max-pdf-pages: 3
+    check-on-startup: true                  # 启动时检测OCR可用性（仅输出日志，不阻塞）
+    auto-start: false                       # 是否自动拉起本地PaddleOCR（本地开发可改true）
+    work-dir: "D:\\VScode\\data\\ruoyi-vue-pro-master\\tools\\paddleocr-service"
+    start-command: ".venv\\Scripts\\uvicorn.exe app:app --host 127.0.0.1 --port 8868"
+    startup-wait-seconds: 15

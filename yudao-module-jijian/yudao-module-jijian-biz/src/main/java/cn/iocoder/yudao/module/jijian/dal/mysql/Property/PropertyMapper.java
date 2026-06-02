@@ -30,4 +30,10 @@ public interface PropertyMapper extends BaseMapperX<PropertyDO> {
                 .orderByDesc(PropertyDO::getId));
     }
 
+    /** 根据来源解析数据ID查询房产记录（用于幂等判断） */
+    default PropertyDO selectBySourceParsedDataId(Long sourceParsedDataId) {
+        return selectOne(new LambdaQueryWrapperX<PropertyDO>()
+                .eq(PropertyDO::getSourceParsedDataId, sourceParsedDataId));
+    }
+
 }

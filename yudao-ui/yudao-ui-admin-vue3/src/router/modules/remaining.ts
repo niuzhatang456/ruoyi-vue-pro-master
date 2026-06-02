@@ -107,7 +107,8 @@ const remainingRouter: AppRouteRecordRaw[] = [
         name: 'JijianInputDrag',
         meta: {
           title: '拖拽录入',
-          icon: 'ep:folder-add'
+          icon: 'ep:folder-add',
+          hidden: true   // 暂时隐藏拖拽录入入口，避免与其他录入功能冲突
         }
       }
     ]

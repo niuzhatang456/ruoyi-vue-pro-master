@@ -70,3 +70,7 @@ export const WmProductRecptApi = {
     return await request.download({ url: '/mes/wm/product-recpt/export-excel', params })
   }
 }
+
+// 别名：兼容视图层使用 WmProductReceiptApi 的导入
+export const WmProductReceiptApi = WmProductRecptApi
+export type WmProductReceiptVO = WmProductRecptVO

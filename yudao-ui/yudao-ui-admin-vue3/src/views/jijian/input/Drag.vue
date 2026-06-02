@@ -1,100 +1,212 @@
 <template>
-  <PageShell
-    title="拖拽录入"
-    description="通过拖拽方式批量上传文件，后端逐条生成导入记录并模拟识别表单类型。"
-  >
+  <PageShell title="拖拽录入" description="批量拖拽上传文件，每个文件独立解析并展示状态。">
     <el-upload
       class="upload-area"
       drag
       multiple
       :auto-upload="false"
       :show-file-list="false"
-      :disabled="loading"
-      :on-change="handleUploadChange"
+      :disabled="uploading"
+      :on-change="handleFileChange"
     >
       <Icon icon="ep:folder-add" class="upload-icon" />
       <div class="el-upload__text">拖拽多个文件到此处批量导入</div>
       <template #tip>
-        <div class="el-upload__tip">
-          批量导入记录会写入 sourceType=drag，并由系统自动生成 detectedFormType。
-        </div>
+        <div class="el-upload__tip">支持 Excel(.xls/.xlsx)、CSV、图片(JPG/PNG)、PDF</div>
       </template>
     </el-upload>
 
-    <ImportRecordTable class="mt-16px" v-loading="loading" :records="records" />
-    <el-table v-if="parsedDataList.length" class="mt-16px" :data="parsedDataList" border>
-      <el-table-column prop="fileName" label="文件名" min-width="180" />
-      <el-table-column prop="status" label="解析状态" width="120">
-        <template #default="{ row }">
-          <el-tag :type="row.status === 'failed' ? 'danger' : 'success'">{{ row.status }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="formType" label="识别类型" width="140" />
-      <el-table-column label="解析结果" width="120">
-        <template #default="{ row }">
-          <el-tag :type="row.id ? 'success' : 'warning'">{{ row.id ? '已生成' : '未生成' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="errorMsg" label="失败原因" min-width="180" show-overflow-tooltip />
-    </el-table>
+    <!-- 批量状态列表 -->
+    <div v-if="fileResults.length > 0" class="mt-16px">
+      <el-table :data="fileResults" border size="small">
+        <el-table-column type="index" label="#" width="50" />
+        <el-table-column prop="fileName" label="文件名" min-width="180" show-overflow-tooltip />
+        <el-table-column label="解析状态" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.loading" type="warning" size="small">
+              <el-icon class="is-loading"><Loading /></el-icon> 解析中
+            </el-tag>
+            <el-tag v-else-if="row.status === 'confirmed'" type="success" size="small">已确认</el-tag>
+            <el-tag v-else-if="row.status === 'success'"  type="success" size="small">解析成功</el-tag>
+            <el-tag v-else-if="row.status === 'failed'"   type="danger"  size="small">失败</el-tag>
+            <el-tag v-else type="info" size="small">-</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="识别类型" width="110">
+          <template #default="{ row }">
+            {{ row.formType || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="行数" width="70">
+          <template #default="{ row }">{{ row.totalRows ?? '-' }}</template>
+        </el-table-column>
+        <el-table-column label="业务表" min-width="160">
+          <template #default="{ row }">
+            <el-tag v-if="row.businessTable" type="success" size="small">{{ row.businessTable }}</el-tag>
+            <span v-else-if="row.errorMsg" class="error-text">{{ row.errorMsg }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.parsedId && row.status === 'success'"
+              type="primary"
+              size="small"
+              link
+              :loading="row.confirming"
+              @click="confirmSingle(row)"
+            >确认写入</el-button>
+            <el-text v-else-if="row.status === 'confirmed'" type="success" size="small">
+              已写入 {{ row.businessIds ? JSON.parse(row.businessIds).join(',') : '' }}
+            </el-text>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- 全部确认按钮 -->
+    <div v-if="canConfirmAll" class="mt-12px">
+      <el-button type="primary" :loading="confirmingAll" @click="confirmAll">
+        全部确认写入（{{ pendingCount }} 个）
+      </el-button>
+    </div>
   </PageShell>
 </template>
 
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
+import { Loading }   from '@element-plus/icons-vue'
 import type { UploadFile, UploadFiles } from 'element-plus'
-import { getParsedData, uploadDragImportFiles } from '@/api/jijian/import'
+import { confirmWrite, getParsedData, uploadExcelImportFile, uploadOcrImportFile } from '@/api/jijian/import'
 import PageShell from '../components/PageShell.vue'
-import ImportRecordTable from '../components/ImportRecordTable.vue'
-import type { ImportRecord, ParsedData } from '../types'
 
-const loading = ref(false)
-const records = ref<ImportRecord[]>([])
-const parsedDataList = ref<ParsedData[]>([])
+const OCR_EXTS   = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.pdf']
+
+interface FileResult {
+  fileName: string
+  loading:  boolean
+  status:   string
+  formType: string
+  totalRows?: number
+  errorMsg?: string
+  parsedId?: number
+  businessTable?: string
+  businessIds?: string
+  confirming: boolean
+}
+
+const uploading    = ref(false)
+const confirmingAll = ref(false)
+const fileResults  = ref<FileResult[]>([])
+
 let uploadTimer: ReturnType<typeof setTimeout> | undefined
+const pendingQueue = ref<File[]>([])
 
-const getErrorMessage = (error: unknown) => {
-  if (typeof error === 'string') return error
-  if (error instanceof Error && error.message) return error.message
-  return '导入失败，请稍后重试'
+function getExt(name: string) {
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.substring(dot).toLowerCase() : ''
 }
 
-const uploadFiles = async (files: File[]) => {
-  if (!files.length) {
-    ElMessage.warning('请先选择要上传的文件')
-    return
-  }
-  loading.value = true
-  try {
-    const createdRecords = await uploadDragImportFiles(files)
-    records.value = [...createdRecords, ...records.value]
-    parsedDataList.value = await Promise.all(createdRecords.map((record) => getParsedData(record.id)))
-    ElMessage.success('导入记录已生成')
-  } catch (error) {
-    ElMessage.error(getErrorMessage(error))
-  } finally {
-    loading.value = false
-  }
-}
+const canConfirmAll = computed(() =>
+  fileResults.value.some(r => r.status === 'success' && !r.loading && !r.confirming)
+)
+const pendingCount = computed(() =>
+  fileResults.value.filter(r => r.status === 'success' && !r.loading).length
+)
 
-const handleUploadChange = (_file: UploadFile, fileList: UploadFiles) => {
-  if (uploadTimer) {
-    clearTimeout(uploadTimer)
-  }
+const handleFileChange = (_file: UploadFile, fileList: UploadFiles) => {
+  if (uploadTimer) clearTimeout(uploadTimer)
   uploadTimer = setTimeout(() => {
-    const files = fileList.map((item) => item.raw).filter((item): item is File => Boolean(item))
+    const files = fileList
+      .map(f => f.raw)
+      .filter((f): f is File => Boolean(f))
+      .filter(f => !fileResults.value.some(r => r.fileName === f.name))
+    if (files.length === 0) return
     uploadFiles(files)
-  }, 0)
+  }, 200)
+}
+
+async function uploadFiles(files: File[]) {
+  uploading.value = true
+
+  // Add placeholders
+  const newRows: FileResult[] = files.map(f => ({
+    fileName: f.name, loading: true, status: '', formType: '',
+    errorMsg: '', confirming: false
+  }))
+  fileResults.value = [...fileResults.value, ...newRows]
+
+  // Upload in parallel (but limit to 3 at a time)
+  const CONCURRENCY = 3
+  for (let i = 0; i < files.length; i += CONCURRENCY) {
+    const batch = files.slice(i, i + CONCURRENCY)
+    await Promise.all(batch.map(f => uploadSingle(f)))
+  }
+  uploading.value = false
+}
+
+async function uploadSingle(file: File) {
+  const row = fileResults.value.find(r => r.fileName === file.name)
+  if (!row) return
+  try {
+    const isOcr = OCR_EXTS.includes(getExt(file.name))
+    const record = isOcr
+      ? await uploadOcrImportFile(file)
+      : await uploadExcelImportFile(file)
+
+    const pd = await getParsedData(record.id)
+    row.status   = pd.status
+    row.formType = pd.formType || ''
+    row.errorMsg = pd.errorMsg || ''
+    row.parsedId = pd.id as number
+
+    try {
+      const pj = JSON.parse(pd.parsedJson || '{}')
+      row.totalRows = typeof pj.totalRows === 'number' ? pj.totalRows : pj.rows?.length
+    } catch { /* ignore */ }
+
+    if (pd.businessTable) {
+      row.businessTable = pd.businessTable
+      row.businessIds   = pd.businessIds
+    }
+  } catch (err: unknown) {
+    row.status   = 'failed'
+    row.errorMsg = err instanceof Error ? err.message : '上传失败'
+  } finally {
+    row.loading = false
+  }
+}
+
+async function confirmSingle(row: FileResult) {
+  if (!row.parsedId) return
+  row.confirming = true
+  try {
+    const result = await confirmWrite(row.parsedId)
+    row.status        = 'confirmed'
+    row.businessTable = result.businessTable || row.formType
+    row.businessIds   = JSON.stringify(result.confirmedIds)
+    ElMessage.success(`${row.formType} 写入 ${result.confirmedCount} 条`)
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '确认写入失败')
+  } finally {
+    row.confirming = false
+  }
+}
+
+async function confirmAll() {
+  confirmingAll.value = true
+  const pending = fileResults.value.filter(r => r.status === 'success' && !r.loading)
+  await Promise.all(pending.map(r => confirmSingle(r)))
+  confirmingAll.value = false
+  ElMessage.success(`全部确认写入完成（${pending.length} 个）`)
 }
 </script>
 
 <style scoped>
-.upload-area {
-  width: 100%;
-}
-
-.upload-icon {
-  font-size: 48px;
-  color: var(--el-color-primary);
-}
+.upload-area  { width: 100%; }
+.upload-icon  { font-size: 48px; color: var(--el-color-primary); }
+.mt-16px      { margin-top: 16px; }
+.mt-12px      { margin-top: 12px; }
+.error-text   { color: var(--el-color-danger); font-size: 12px; }
 </style>

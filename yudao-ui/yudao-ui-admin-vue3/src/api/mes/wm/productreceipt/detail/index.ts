@@ -49,3 +49,6 @@ export const WmProductRecptDetailApi = {
     return await request.delete({ url: '/mes/wm/product-recpt-detail/delete?id=' + id })
   }
 }
+
+export const WmProductReceiptDetailApi = WmProductRecptDetailApi
+export type WmProductReceiptDetailVO = WmProductRecptDetailVO

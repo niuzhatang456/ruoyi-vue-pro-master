@@ -1,62 +1,58 @@
 package cn.iocoder.yudao.module.jijian.dal.dataobject.Property;
 
-import lombok.*;
-import java.util.*;
-import java.time.LocalDateTime;
+import cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO;
+import com.baomidou.mybatisplus.annotation.KeySequence;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.time.LocalDateTime;
-import com.baomidou.mybatisplus.annotation.*;
-import cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO;
 
 /**
  * 房产情况 DO
- *
- * @author admin
  */
 @TableName("jijian_property")
-@KeySequence("jijian_property_seq") // 用于 Oracle、PostgreSQL、Kingbase、DB2、H2 数据库的主键自增。如果是 MySQL 等数据库，可不写。
+@KeySequence("jijian_property_seq")
 @Data
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PropertyDO extends BaseDO {
+public class PropertyDO extends TenantBaseDO {
 
-    /**
-     * ä¸»é”®ç¼–å·
-     */
+    /** 主键编号 */
     @TableId
     private Long id;
-    /**
-     * æˆ¿äº§åœ°å€
-     */
+
+    /** 房产地址 */
     private String propertyAddress;
-    /**
-     * æˆ¿äº§åç§°
-     */
+
+    /** 房产名称 */
     private String propertyName;
-    /**
-     * äº§æƒä¿¡æ¯
-     */
+
+    /** 产权信息 */
     private String ownershipInfo;
-    /**
-     * å»ºç­‘æ—¶é—´
-     */
+
+    /** 建筑时间 */
     private LocalDateTime buildingTime;
-    /**
-     * å»ºç­‘é¢ç§¯ï¼ˆå¹³æ–¹ç±³ï¼‰
-     */
+
+    /** 建筑面积（平方米） */
     private BigDecimal area;
-    /**
-     * ç§Ÿèµæƒ…å†µ
-     */
+
+    /** 租赁情况 */
     private String leaseStatus;
-    /**
-     * å¤‡æ³¨
-     */
+
+    /** 备注 */
     private String remark;
 
+    /** 来源解析数据ID，关联 jijian_import_parsed_data.id，可追溯导入记录 */
+    private Long sourceParsedDataId;
 
 }
