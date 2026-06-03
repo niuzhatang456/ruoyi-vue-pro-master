@@ -333,15 +333,14 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         String fileName = StrUtil.blankToDefault(file.getOriginalFilename(), "未命名文件");
 
         if (!jijianProperties.getOcr().isEnabled()) {
-            throw new IllegalArgumentException(jijianProperties.getOcr().getDisabledMessage());
+            throw exception(OCR_SERVICE_NOT_ENABLED);
         }
 
         byte[] fileBytes = file.getBytes();
-        OcrResult ocrResult = ocrService.recognize(fileBytes, fileName);  // 可能抛 IllegalStateException
+        OcrResult ocrResult = ocrService.recognize(fileBytes, fileName);
 
         if (!ocrResult.isSuccess()) {
-            throw new IllegalArgumentException(StrUtil.blankToDefault(
-                    ocrResult.getErrorMessage(), "OCR 识别失败，请检查图片清晰度或改用 Excel 上传"));
+            throw exception(OCR_RECOGNITION_FAILED);
         }
 
         return buildOcrPayload(fileName, ocrResult);
@@ -388,7 +387,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             if (fromLines != null) return fromLines;
         }
 
-        throw new IllegalArgumentException("未识别到有效表头，请检查图片表头是否清晰，或改用 Excel 上传");
+        throw exception(OCR_NO_TABLE_DETECTED);
     }
 
     /** 从 lines 尝试多种分隔符解析表格 */

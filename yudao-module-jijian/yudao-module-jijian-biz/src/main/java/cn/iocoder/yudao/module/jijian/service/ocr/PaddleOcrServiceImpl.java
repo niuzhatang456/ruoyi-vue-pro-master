@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.jijian.service.ocr;
 
 import cn.hutool.core.util.StrUtil;
+import cn.iocoder.yudao.framework.common.exception.ServiceException;
 import cn.iocoder.yudao.module.jijian.framework.JijianProperties;
 import cn.iocoder.yudao.module.jijian.service.ocr.dto.PaddleOcrResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,6 +26,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
+import static cn.iocoder.yudao.module.jijian.enums.ErrorCodeConstants.*;
+
 /**
  * PaddleOCR 本地服务实现
  * <p>
@@ -42,11 +46,6 @@ import java.util.stream.Collectors;
 public class PaddleOcrServiceImpl implements OcrService {
 
     private static final Logger log = LoggerFactory.getLogger(PaddleOcrServiceImpl.class);
-
-    private static final String SERVICE_NOT_STARTED_MSG =
-            "PaddleOCR 本地服务未启动，请先执行：" +
-            "cd tools/paddleocr-service && .venv\\Scripts\\activate && " +
-            "uvicorn app:app --host 127.0.0.1 --port 8868";
 
     @Resource
     private JijianProperties jijianProperties;
@@ -69,7 +68,7 @@ public class PaddleOcrServiceImpl implements OcrService {
         int    timeoutSecs  = ocrCfg.getTimeoutSeconds();
 
         if (!isHealthy(ocrCfg.getHealthEndpoint())) {
-            return failResult(SERVICE_NOT_STARTED_MSG);
+            throw exception(OCR_SERVICE_NOT_STARTED);
         }
 
         try {
@@ -89,22 +88,24 @@ public class PaddleOcrServiceImpl implements OcrService {
 
             if (response.statusCode() != 200) {
                 log.warn("[PaddleOCR] HTTP {} from {}", response.statusCode(), endpoint);
-                return failResult("PaddleOCR 服务返回异常状态码 " + response.statusCode());
+                throw exception(OCR_SERVICE_ERROR);
             }
 
             PaddleOcrResponse resp = objectMapper.readValue(response.body(), PaddleOcrResponse.class);
             return convertToOcrResult(resp);
 
         } catch (ConnectException e) {
-            throw new IllegalStateException(SERVICE_NOT_STARTED_MSG);
+            throw exception(OCR_SERVICE_NOT_STARTED);
         } catch (java.net.http.HttpTimeoutException e) {
-            throw new IllegalStateException("PaddleOCR 服务超时（" + timeoutSecs + "s），请检查服务是否正常运行");
+            throw exception(OCR_SERVICE_TIMEOUT);
+        } catch (ServiceException e) {
+            throw e;
         } catch (Exception e) {
             if (e.getCause() instanceof ConnectException) {
-                throw new IllegalStateException(SERVICE_NOT_STARTED_MSG);
+                throw exception(OCR_SERVICE_NOT_STARTED);
             }
             log.error("[PaddleOCR] request failed to {}", endpoint, e);
-            throw new IllegalStateException("调用 PaddleOCR 服务失败：" + e.getMessage());
+            throw exception(OCR_SERVICE_ERROR);
         }
     }
 
@@ -148,12 +149,12 @@ public class PaddleOcrServiceImpl implements OcrService {
 
     private OcrResult convertToOcrResult(PaddleOcrResponse resp) {
         if (!resp.isSuccess()) {
-            return failResult(StrUtil.blankToDefault(resp.getMessage(), "OCR 识别失败，请检查图片清晰度"));
+            throw exception(OCR_RECOGNITION_FAILED);
         }
 
         String fullText = StrUtil.blankToDefault(resp.getText(), "");
         if (StrUtil.isBlank(fullText)) {
-            return failResult("未识别到有效文字，请检查图片清晰度或改用 Excel 上传");
+            throw exception(OCR_RECOGNITION_FAILED);
         }
 
         List<String> lines = new ArrayList<>();
@@ -186,9 +187,4 @@ public class PaddleOcrServiceImpl implements OcrService {
                 .build();
     }
 
-    private OcrResult failResult(String msg) {
-        return OcrResult.builder()
-                .success(false).fullText("").lines(new ArrayList<>())
-                .tables(new ArrayList<>()).errorMessage(msg).build();
-    }
 }
