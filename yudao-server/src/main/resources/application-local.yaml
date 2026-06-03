@@ -8,8 +8,9 @@ spring:
     exclude:
       - com.alibaba.druid.spring.boot.autoconfigure.DruidDataSourceAutoConfigure # 排除 Druid 的自动配置，使用 dynamic-datasource-spring-boot-starter 配置多数据源
       - org.springframework.boot.autoconfigure.quartz.QuartzAutoConfiguration # 默认 local 环境，不开启 Quartz 的自动配置
-      - org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration # 禁用 AI 模块的 Qdrant，手动创建
-      - org.springframework.ai.vectorstore.milvus.autoconfigure.MilvusVectorStoreAutoConfiguration # 禁用 AI 模块的 Milvus，手动创建
+      # 以下 AI 模块相关排除项仅在 yudao-module-ai 启用后有效，当前已注释（AI 模块未启用）
+      # - org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration
+      # - org.springframework.ai.vectorstore.milvus.autoconfigure.MilvusVectorStoreAutoConfiguration
   # 数据源配置项
   datasource:
     druid: # Druid 【监控】相关的全局配置
@@ -293,3 +294,26 @@ jijian:
     work-dir: "D:\\VScode\\data\\ruoyi-vue-pro-master\\tools\\paddleocr-service"
     start-command: ".venv\\Scripts\\uvicorn.exe app:app --host 127.0.0.1 --port 8868"
     startup-wait-seconds: 15
+  query:
+    ai:
+      # ── P3 query module AI config ─────────────────────────────────────
+      # enabled=false (default): local rule-based fallback, aiMode=LOCAL_FALLBACK
+      # enabled=true:  attempt DeepSeek direct HTTP; auto-fallback on any error
+      #
+      # HOW TO ENABLE (local dev only — NEVER commit a real key):
+      #   export DEEPSEEK_API_KEY=<your-real-key>
+      #   then change enabled to true below
+      enabled: false
+      # API key via environment variable — empty = disabled (safe default).
+      # To set: export DEEPSEEK_API_KEY=<your-real-key>
+      api-key: ${DEEPSEEK_API_KEY:}
+      # DeepSeek endpoint (override via DEEPSEEK_API_URL if using a proxy)
+      api-url: ${DEEPSEEK_API_URL:https://api.deepseek.com/v1/chat/completions}
+      # Model name
+      intent-model: ${DEEPSEEK_MODEL:deepseek-chat}
+      # Whether to also generate a Chinese summary via DeepSeek
+      summary-enabled: true
+      # HTTP timeout in seconds
+      timeout-seconds: 30
+      # Max conversation history rounds forwarded to the chat endpoint
+      max-history-rounds: 6

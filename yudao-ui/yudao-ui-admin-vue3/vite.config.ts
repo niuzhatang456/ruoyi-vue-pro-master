@@ -74,16 +74,19 @@ export default ({command, mode}: ConfigEnv): UserConfig => {
             ]
         },
         build: {
-            minify: 'terser',
+            // 改用 esbuild 替代 terser：terser 在当前 Node v24 + WSL 环境下会 SIGSEGV（本地环境 OOM/native crash）。
+            // esbuild 已内置于 Vite，输出质量与 terser 基本相当，且速度快、稳定。
+            // TODO: 如需 drop_console/drop_debugger，可在 esbuildOptions 中配置。
+            minify: 'esbuild',
+            esbuildOptions: {
+                drop: [
+                    ...(env.VITE_DROP_DEBUGGER === 'true' ? ['debugger'] as const : []),
+                    ...(env.VITE_DROP_CONSOLE === 'true' ? ['console'] as const : []),
+                ],
+            },
             outDir: env.VITE_OUT_DIR || 'dist',
             sourcemap: env.VITE_SOURCEMAP === 'true' ? 'inline' : false,
             // brotliSize: false,
-            terserOptions: {
-                compress: {
-                    drop_debugger: env.VITE_DROP_DEBUGGER === 'true',
-                    drop_console: env.VITE_DROP_CONSOLE === 'true'
-                }
-            },
             rollupOptions: {
                 output: {
                     codeSplitting: {

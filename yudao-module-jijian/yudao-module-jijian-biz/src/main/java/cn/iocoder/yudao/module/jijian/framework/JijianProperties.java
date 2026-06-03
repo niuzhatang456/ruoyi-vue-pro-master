@@ -16,6 +16,9 @@ public class JijianProperties {
     /** OCR 识别相关配置 */
     private Ocr ocr = new Ocr();
 
+    /** P3 查询模块 AI 配置 */
+    private Query query = new Query();
+
     @Data
     public static class Ocr {
         /**
@@ -80,5 +83,57 @@ public class JijianProperties {
         /** OCR 未配置时对用户展示的提示信息 */
         private String disabledMessage =
                 "OCR 识别服务未配置，请改用 Excel 或 CSV 上传；或联系管理员部署本地 PaddleOCR 服务后重试。";
+    }
+
+    // ========================================================================
+    // P3 查询模块配置
+    // ========================================================================
+    @Data
+    public static class Query {
+        private Ai ai = new Ai();
+
+        @Data
+        public static class Ai {
+            /**
+             * 是否启用 AI 辅助查询。
+             * false（默认）：使用本地规则解析，aiMode=LOCAL_FALLBACK。
+             * true：尝试调用 DeepSeek API，失败时自动回退 LOCAL_FALLBACK。
+             */
+            private boolean enabled = false;
+
+            /**
+             * DeepSeek API Key。
+             * 不要硬编码！请在 application-local.yaml 中配置：
+             *   jijian.query.ai.api-key: ${DEEPSEEK_API_KEY:}
+             *
+             * 当前使用 jijian 模块自有配置管理 API Key。
+             */
+            private String apiKey = "";
+
+            /**
+             * DeepSeek API 地址（默认官方接口）
+             */
+            private String apiUrl = "https://api.deepseek.com/v1/chat/completions";
+
+            /**
+             * 意图解析使用的模型
+             */
+            private String intentModel = "deepseek-chat";
+
+            /**
+             * 是否启用 AI 生成中文总结（true=用 DeepSeek 总结，false=用本地模板）
+             */
+            private boolean summaryEnabled = true;
+
+            /**
+             * API 调用超时（秒）
+             */
+            private int timeoutSeconds = 30;
+
+            /**
+             * 最大保留历史轮数
+             */
+            private int maxHistoryRounds = 6;
+        }
     }
 }
