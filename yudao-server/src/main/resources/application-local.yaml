@@ -294,6 +294,13 @@ jijian:
     work-dir: "D:\\VScode\\data\\ruoyi-vue-pro-master\\tools\\paddleocr-service"
     start-command: ".venv\\Scripts\\uvicorn.exe app:app --host 127.0.0.1 --port 8868"
     startup-wait-seconds: 15
+  ai:
+    deepseek:
+      enabled: true
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      model: ${DEEPSEEK_MODEL:deepseek-chat}
+      api-key: ${DEEPSEEK_API_KEY:}
+      timeout-seconds: 30
   query:
     ai:
       # ── P3 query module AI config ─────────────────────────────────────

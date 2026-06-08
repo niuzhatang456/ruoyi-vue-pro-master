@@ -6,6 +6,7 @@ import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.module.jijian.controller.admin.query.vo.JijianAttendancePageReqVO;
 import cn.iocoder.yudao.module.jijian.dal.dataobject.attendancedaily.AttendanceDailyDO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.apache.ibatis.annotations.Mapper;
 
 import java.time.LocalDate;
@@ -23,11 +24,12 @@ public interface AttendanceDailyMapper extends BaseMapperX<AttendanceDailyDO> {
 
     default PageResult<AttendanceDailyDO> selectPageForQuery(JijianAttendancePageReqVO req,
                                                               LocalDate startDate) {
-        LambdaQueryWrapper<AttendanceDailyDO> wrapper = new LambdaQueryWrapper<AttendanceDailyDO>()
-                .ge(AttendanceDailyDO::getAttendanceDate, startDate)
-                .orderByDesc(AttendanceDailyDO::getAttendanceDate);
-        if (req.getDepartment() != null && !"ALL".equals(req.getDepartment())) {
-            wrapper.eq(AttendanceDailyDO::getDepartment, req.getDepartment());
+        QueryWrapper<AttendanceDailyDO> wrapper = new QueryWrapper<AttendanceDailyDO>()
+                .ge("create_time", startDate.atStartOfDay())
+                .orderByDesc("create_time");
+        String dept = req.getDepartment();
+        if (dept != null && !"ALL".equals(dept) && !dept.isEmpty()) {
+            wrapper.eq("department", dept);
         }
         return selectPage(req, wrapper);
     }
@@ -42,8 +44,19 @@ public interface AttendanceDailyMapper extends BaseMapperX<AttendanceDailyDO> {
     }
 
     default List<AttendanceDailyDO> selectListForSummary(String department, LocalDate startDate) {
+        QueryWrapper<AttendanceDailyDO> wrapper = new QueryWrapper<AttendanceDailyDO>()
+                .ge("create_time", startDate.atStartOfDay());
+        if (department != null && !"ALL".equals(department) && !department.isEmpty()) {
+            wrapper.eq("department", department);
+        }
+        return selectList(wrapper);
+    }
+
+    default List<AttendanceDailyDO> selectListInDateRange(LocalDate startDate, LocalDate endDate, String department) {
         LambdaQueryWrapper<AttendanceDailyDO> wrapper = new LambdaQueryWrapper<AttendanceDailyDO>()
-                .ge(AttendanceDailyDO::getAttendanceDate, startDate);
+                .ge(AttendanceDailyDO::getAttendanceDate, startDate)
+                .le(AttendanceDailyDO::getAttendanceDate, endDate)
+                .orderByAsc(AttendanceDailyDO::getAttendanceDate);
         if (department != null && !"ALL".equals(department)) {
             wrapper.eq(AttendanceDailyDO::getDepartment, department);
         }

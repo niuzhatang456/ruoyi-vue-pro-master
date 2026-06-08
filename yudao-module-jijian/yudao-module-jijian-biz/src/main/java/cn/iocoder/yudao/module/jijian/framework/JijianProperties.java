@@ -19,6 +19,9 @@ public class JijianProperties {
     /** P3 查询模块 AI 配置 */
     private Query query = new Query();
 
+    /** Jijian AIGC config. Prefer this path for new DeepSeek settings. */
+    private Ai ai = new Ai();
+
     @Data
     public static class Ocr {
         /**
@@ -134,6 +137,20 @@ public class JijianProperties {
              * 最大保留历史轮数
              */
             private int maxHistoryRounds = 6;
+        }
+    }
+
+    @Data
+    public static class Ai {
+        private Deepseek deepseek = new Deepseek();
+
+        @Data
+        public static class Deepseek {
+            private boolean enabled = false;
+            private String baseUrl = "https://api.deepseek.com";
+            private String model = "deepseek-v4-pro";
+            private String apiKey = "";
+            private int timeoutSeconds = 30;
         }
     }
 }

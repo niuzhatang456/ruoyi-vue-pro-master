@@ -128,6 +128,40 @@ public class ParsedDataServiceImpl implements ParsedDataService {
     }
 
     @Override
+    public ParsedDataDO parseAndCreateWithFormType(ImportRecordDO importRecord, MultipartFile file, String forcedFormType) {
+        try {
+            String fname = StrUtil.blankToDefault(file.getOriginalFilename(), "").toLowerCase(Locale.ROOT);
+            ParsedPayload payload;
+            if (isExcel(fname)) {
+                payload = parseExcel(file);
+            } else if (isCsv(fname)) {
+                payload = parseCsv(file);
+            } else if (isImageOrPdf(fname)) {
+                payload = parseImageOrPdf(file, fname);
+            } else {
+                payload = parseTextFile(file);
+            }
+
+            ParsedDataDO parsedData = ParsedDataDO.builder()
+                    .importRecordId(importRecord.getId())
+                    .formType(forcedFormType)
+                    .rawText(StrUtil.maxLength(payload.rawText, 2000))
+                    .parsedJson(JSONUtil.toJsonStr(payload.parsedData))
+                    .confidence(new BigDecimal("0.86"))
+                    .status(STATUS_SUCCESS)
+                    .confirmStatus(CONFIRM_STATUS_PENDING)
+                    .build();
+            parsedDataMapper.insert(parsedData);
+            updateImportRecord(importRecord, forcedFormType, STATUS_SUCCESS);
+            return parsedData;
+
+        } catch (Exception ex) {
+            return createFailedParsedData(importRecord,
+                    StrUtil.blankToDefault(ex.getMessage(), "文件解析失败，请检查文件格式"));
+        }
+    }
+
+    @Override
     public ParsedDataDO createFailedParsedData(ImportRecordDO importRecord, String errorMsg) {
         ParsedDataDO parsedData = ParsedDataDO.builder()
                 .importRecordId(importRecord.getId())

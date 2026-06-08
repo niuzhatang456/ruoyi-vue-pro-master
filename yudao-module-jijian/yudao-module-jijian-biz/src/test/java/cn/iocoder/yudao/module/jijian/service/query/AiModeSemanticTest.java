@@ -1,10 +1,25 @@
 package cn.iocoder.yudao.module.jijian.service.query;
 
+import cn.iocoder.yudao.module.jijian.controller.admin.query.vo.JijianQueryChatReqVO;
+import cn.iocoder.yudao.module.jijian.framework.JijianProperties;
+import cn.iocoder.yudao.module.jijian.service.query.ai.JijianDeepSeekIntentClient;
 import cn.iocoder.yudao.module.jijian.service.query.ai.IntentResult;
 import cn.iocoder.yudao.module.jijian.service.query.ai.JijianAiIntentClient;
+import cn.iocoder.yudao.module.jijian.service.query.ai.JijianQueryFieldWhitelist;
+import cn.iocoder.yudao.module.jijian.service.query.ai.LocalFallbackAiIntentClient;
 import cn.iocoder.yudao.module.jijian.service.query.ai.SummaryResult;
 import cn.iocoder.yudao.module.jijian.service.query.dto.JijianAiQueryIntent;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
+
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.Collections;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -102,7 +117,7 @@ class AiModeSemanticTest {
 
         // Simulate: DeepSeek returned something and it passed whitelist (no SQL keys)
         JijianAiQueryIntent safeIntent = new JijianAiQueryIntent();
-        safeIntent.setFormType("ATTENDANCE");
+        safeIntent.setFormType("ATTENDANCE_DAILY");
         safeIntent.setDepartment("ALL");
         safeIntent.setTimeRange("ONE_WEEK");
 
@@ -113,7 +128,110 @@ class AiModeSemanticTest {
         // aiMode can be DEEPSEEK_SUMMARY, but the intent has no SQL
         assertEquals("DEEPSEEK_SUMMARY", mode);
         // Verify the intent has no dangerous fields
-        assertEquals("ATTENDANCE", intentResult.getIntent().getFormType());
+        assertEquals("ATTENDANCE_DAILY", intentResult.getIntent().getFormType());
         assertEquals("ALL", intentResult.getIntent().getDepartment());
+    }
+
+    @Test
+    void dropdownFormTypeOverridesAiOrNaturalLanguageIntent() throws Exception {
+        JijianQueryChatServiceImpl service = new JijianQueryChatServiceImpl();
+        JijianQueryChatReqVO req = new JijianQueryChatReqVO();
+        req.setFormType("ATTENDANCE");
+        req.setDepartment("ALL");
+        req.setTimeRange("ONE_WEEK");
+        req.setMessage("帮我分析食堂供应价格差异");
+
+        JijianAiQueryIntent aiIntent = new JijianAiQueryIntent();
+        aiIntent.setFormType("CANTEEN_SUPPLY");
+        aiIntent.setDepartment("ALL");
+        aiIntent.setTimeRange("ONE_WEEK");
+
+        Method sanitize = JijianQueryChatServiceImpl.class
+                .getDeclaredMethod("sanitizeIntent", JijianAiQueryIntent.class, JijianQueryChatReqVO.class);
+        sanitize.setAccessible(true);
+        JijianAiQueryIntent result = (JijianAiQueryIntent) sanitize.invoke(service, aiIntent, req);
+
+        assertEquals("ATTENDANCE_DAILY", result.getFormType());
+    }
+
+    @Test
+    void configuredKey_usesHttpDeepSeekPath() throws Exception {
+        AtomicBoolean called = new AtomicBoolean(false);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/chat/completions", exchange -> {
+            called.set(true);
+            String payload = "{\"choices\":[{\"message\":{\"content\":\"{\\\"formType\\\":\\\"ATTENDANCE\\\","
+                    + "\\\"department\\\":\\\"ALL\\\",\\\"timeRange\\\":\\\"ONE_WEEK\\\","
+                    + "\\\"metrics\\\":[\\\"TOTAL\\\"],\\\"needDetail\\\":false,"
+                    + "\\\"analysisGoal\\\":\\\"统计考勤\\\",\\\"confidence\\\":0.9}\"}}]}";
+            byte[] bytes = payload.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+        server.start();
+        try {
+            JijianDeepSeekIntentClient client = deepSeekClient("http://127.0.0.1:" + server.getAddress().getPort(),
+                    "unit-test-key");
+            JijianQueryChatReqVO req = new JijianQueryChatReqVO();
+            req.setMessage("统计考勤");
+            req.setDepartment("ALL");
+            req.setTimeRange("ONE_WEEK");
+            IntentResult result = client.parseIntent(req);
+
+            assertEquals(true, called.get());
+            assertEquals(true, result.isAiGenerated());
+            assertEquals("ATTENDANCE", result.getIntent().getFormType());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void deepSeekHttpFailure_fallsBack() throws Exception {
+        JijianDeepSeekIntentClient client = deepSeekClient("http://127.0.0.1:9", "unit-test-key");
+        JijianQueryChatReqVO req = new JijianQueryChatReqVO();
+        req.setMessage("统计考勤");
+        req.setDepartment("ALL");
+        req.setTimeRange("ONE_WEEK");
+        IntentResult result = client.parseIntent(req);
+
+        assertEquals(false, result.isAiGenerated());
+        assertEquals("ATTENDANCE_DAILY", result.getIntent().getFormType());
+    }
+
+    private JijianDeepSeekIntentClient deepSeekClient(String baseUrl, String apiKey) throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        JijianProperties properties = new JijianProperties();
+        properties.getAi().getDeepseek().setEnabled(true);
+        properties.getAi().getDeepseek().setBaseUrl(baseUrl);
+        properties.getAi().getDeepseek().setModel("deepseek-v4-pro");
+        properties.getAi().getDeepseek().setApiKey(apiKey);
+        properties.getAi().getDeepseek().setTimeoutSeconds(1);
+
+        LocalFallbackAiIntentClient fallback = new LocalFallbackAiIntentClient();
+        JijianQueryFieldWhitelist whitelist = new JijianQueryFieldWhitelist();
+        setField(whitelist, "objectMapper", objectMapper);
+
+        JijianAttendanceQueryService attendanceQueryService = (JijianAttendanceQueryService) Proxy.newProxyInstance(
+                JijianAttendanceQueryService.class.getClassLoader(),
+                new Class[]{JijianAttendanceQueryService.class},
+                (proxy, method, args) -> "listDepartments".equals(method.getName()) ? Collections.emptyList() : null);
+
+        JijianDeepSeekIntentClient client = new JijianDeepSeekIntentClient();
+        setField(client, "jijianProperties", properties);
+        setField(client, "fallback", fallback);
+        setField(client, "attendanceQueryService", attendanceQueryService);
+        setField(client, "fieldWhitelist", whitelist);
+        setField(client, "objectMapper", objectMapper);
+        return client;
+    }
+
+    private void setField(Object target, String fieldName, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 }

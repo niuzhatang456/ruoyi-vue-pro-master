@@ -11,6 +11,12 @@ public interface ParsedDataService {
 
     ParsedDataDO parseAndCreate(ImportRecordDO importRecord, MultipartFile file);
 
+    /**
+     * 按强制 formType 解析并创建解析数据。
+     * 用于 9 个独立表单录入接口：服务端硬绑定 formType，不依赖文件内容自动识别。
+     */
+    ParsedDataDO parseAndCreateWithFormType(ImportRecordDO importRecord, MultipartFile file, String forcedFormType);
+
     ParsedDataDO createFailedParsedData(ImportRecordDO importRecord, String errorMsg);
 
     ParsedDataDO getParsedDataById(Long parsedDataId);

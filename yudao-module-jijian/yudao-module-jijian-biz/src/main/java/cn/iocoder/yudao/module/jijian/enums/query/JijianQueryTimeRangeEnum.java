@@ -15,11 +15,12 @@ public enum JijianQueryTimeRangeEnum {
     THREE_MONTHS("THREE_MONTHS", "三个月", 90),
     HALF_YEAR("HALF_YEAR", "半年", 180),
     ONE_YEAR("ONE_YEAR", "一年", 365),
+    ALL("ALL", "全部", 3650),
     ;
 
     private final String value;
     private final String label;
-    /** 往前推天数 */
+    /** 往前推天数；ALL = 3650 天（约10年），视为全量 */
     private final int days;
 
     public LocalDate startDate() {

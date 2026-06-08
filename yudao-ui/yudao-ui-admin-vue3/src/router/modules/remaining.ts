@@ -75,7 +75,7 @@ const remainingRouter: AppRouteRecordRaw[] = [
   {
     path: '/input',
     component: Layout,
-    redirect: '/input/ocr',
+    redirect: '/input/drag',
     name: 'JijianInput',
     meta: {
       title: '录入',
@@ -84,12 +84,22 @@ const remainingRouter: AppRouteRecordRaw[] = [
     },
     children: [
       {
+        path: 'drag',
+        component: () => import('@/views/jijian/input/Drag.vue'),
+        name: 'JijianInputDrag',
+        meta: {
+          title: '拖拽录入',
+          icon: 'ep:folder-add'
+        }
+      },
+      {
         path: 'ocr',
         component: () => import('@/views/jijian/input/Ocr.vue'),
         name: 'JijianInputOcr',
         meta: {
           title: '图片/文件识别录入',
-          icon: 'ep:picture'
+          icon: 'ep:picture',
+          hidden: true
         }
       },
       {
@@ -98,18 +108,63 @@ const remainingRouter: AppRouteRecordRaw[] = [
         name: 'JijianInputExcel',
         meta: {
           title: 'Excel录入',
-          icon: 'ep:document'
+          icon: 'ep:document',
+          hidden: true
         }
       },
       {
-        path: 'drag',
-        component: () => import('@/views/jijian/input/Drag.vue'),
-        name: 'JijianInputDrag',
-        meta: {
-          title: '拖拽录入',
-          icon: 'ep:folder-add',
-          hidden: true   // 暂时隐藏拖拽录入入口，避免与其他录入功能冲突
-        }
+        path: 'property-info',
+        component: () => import('@/views/jijian/input/PropertyInfo.vue'),
+        name: 'JijianInputPropertyInfo',
+        meta: { title: '房产情况表', icon: 'ep:office-building' }
+      },
+      {
+        path: 'lessee',
+        component: () => import('@/views/jijian/input/Lessee.vue'),
+        name: 'JijianInputLessee',
+        meta: { title: '租赁人员表', icon: 'ep:user' }
+      },
+      {
+        path: 'lease-contract',
+        component: () => import('@/views/jijian/input/LeaseContract.vue'),
+        name: 'JijianInputLeaseContract',
+        meta: { title: '租赁合同表', icon: 'ep:document' }
+      },
+      {
+        path: 'attendance-daily',
+        component: () => import('@/views/jijian/input/AttendanceDaily.vue'),
+        name: 'JijianInputAttendanceDaily',
+        meta: { title: '考勤日报表', icon: 'ep:calendar' }
+      },
+      {
+        path: 'recuperation-leave',
+        component: () => import('@/views/jijian/input/RecuperationLeave.vue'),
+        name: 'JijianInputRecuperationLeave',
+        meta: { title: '疗休养请假表', icon: 'ep:first-aid-kit' }
+      },
+      {
+        path: 'personal-leave',
+        component: () => import('@/views/jijian/input/PersonalLeave.vue'),
+        name: 'JijianInputPersonalLeave',
+        meta: { title: '事假表', icon: 'ep:tickets' }
+      },
+      {
+        path: 'business-trip',
+        component: () => import('@/views/jijian/input/BusinessTrip.vue'),
+        name: 'JijianInputBusinessTrip',
+        meta: { title: '出差表', icon: 'ep:map-location' }
+      },
+      {
+        path: 'compensatory-leave',
+        component: () => import('@/views/jijian/input/CompensatoryLeave.vue'),
+        name: 'JijianInputCompensatoryLeave',
+        meta: { title: '调休表', icon: 'ep:clock' }
+      },
+      {
+        path: 'canteen-supplier',
+        component: () => import('@/views/jijian/input/CanteenSupplier.vue'),
+        name: 'JijianInputCanteenSupplier',
+        meta: { title: '食堂供应商信息表', icon: 'ep:food' }
       }
     ]
   },

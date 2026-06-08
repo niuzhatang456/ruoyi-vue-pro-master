@@ -15,6 +15,7 @@ public interface JijianAiIntentClient {
     String MODE_LOCAL_FALLBACK = "LOCAL_FALLBACK";
     String MODE_DEEPSEEK_INTENT = "DEEPSEEK_INTENT";
     String MODE_DEEPSEEK_SUMMARY = "DEEPSEEK_SUMMARY";
+    String MODE_DEEPSEEK_DATA_ANALYSIS = "DEEPSEEK_DATA_ANALYSIS";
 
     /**
      * Parse the user's natural-language message into a controlled intent.

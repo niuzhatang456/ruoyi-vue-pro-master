@@ -27,4 +27,16 @@ public class JijianAiQueryIntent {
 
     /** 是否需要明细样本 */
     private boolean needDetail;
+
+    /** 分析目标，仅用于回答边界判断，不参与 SQL 或动态查询 */
+    private String analysisGoal;
+
+    /** 下钻目标，仅用于本地 handler 允许范围内的解释 */
+    private String drillDownTarget;
+
+    /** AI 解析置信度，仅用于展示和调试 */
+    private Double confidence;
+
+    /** 用户原始消息，仅用于跨表检查和边界判断，不参与查询 */
+    private String originalMessage;
 }

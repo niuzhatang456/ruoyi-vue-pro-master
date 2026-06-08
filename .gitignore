@@ -53,3 +53,15 @@ application-my.yaml
 /yudao-ui-app/unpackage/
 **/.DS_Store
 *.bak
+
+### Python virtual environments ###
+**/.venv/
+**/venv/
+**/__pycache__/
+*.pyc
+
+### Compiled Java class files ###
+**/*.class
+
+### Local outputs (generated files) ###
+/outputs/
