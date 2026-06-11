@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.*;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 /** 纪检食堂供应商信息 DO */
 @TableName("jijian_canteen_supplier")
@@ -17,7 +18,11 @@ public class CanteenSupplierDO extends TenantBaseDO {
     private String itemName;
     private String specLevel;
     private String unit;
+    private BigDecimal quantity;
     private BigDecimal price;
+    private BigDecimal subtotal;
+    private String supplierName;
+    private LocalDate supplyDate;
     private String purchasePoint;
     private String remark;
     private Long sourceParsedDataId;

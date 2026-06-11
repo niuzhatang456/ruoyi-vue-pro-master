@@ -9,6 +9,8 @@ import cn.iocoder.yudao.module.jijian.enums.query.JijianQueryFormTypeEnum;
 import cn.iocoder.yudao.module.jijian.enums.query.JijianQueryMetricEnum;
 import cn.iocoder.yudao.module.jijian.enums.query.JijianQueryTimeRangeEnum;
 import cn.iocoder.yudao.module.jijian.service.query.JijianAttendanceAnalysisService.AnalysisResult;
+import cn.iocoder.yudao.module.jijian.service.query.JijianDirectTableAnalysisService;
+import cn.iocoder.yudao.module.jijian.service.query.JijianDirectTableAnalysisService.DirectAnalysisResult;
 import cn.iocoder.yudao.module.jijian.service.query.ai.IntentResult;
 import cn.iocoder.yudao.module.jijian.service.query.ai.JijianAiIntentClient;
 import cn.iocoder.yudao.module.jijian.service.query.ai.JijianDeepSeekIntentClient;
@@ -47,6 +49,8 @@ public class JijianQueryChatServiceImpl implements JijianQueryChatService {
     @Resource
     private JijianAttendanceAnalysisService attendanceAnalysisService;
     @Resource
+    private JijianDirectTableAnalysisService directTableAnalysisService;
+    @Resource
     private JijianFormQueryHandlerRegistry handlerRegistry;
     @Resource
     private ObjectMapper objectMapper;
@@ -63,9 +67,25 @@ public class JijianQueryChatServiceImpl implements JijianQueryChatService {
         resp.setQueryIntent(intent);
         resp.setFormType(intent.getFormType());
 
-        // 考勤5表综合分析路径
+        // formType 无法识别时返回友好提示
+        if (intent.getFormType() == null || intent.getFormType().isBlank()) {
+            resp.setAnswer("请说明要分析的数据类型，例如：考勤日报、疗休养请假、事假记录、出差记录、调休记录、房产情况、租赁合同、租赁人员、食堂供应商等。");
+            resp.setAiMode(JijianAiIntentClient.MODE_LOCAL_FALLBACK);
+            resp.setData(Collections.emptyMap());
+            resp.setSummary(Collections.emptyMap());
+            resp.setPageResult(new PageResult<>(Collections.emptyList(), 0L));
+            resp.setColumns(Collections.emptyList());
+            return resp;
+        }
+
+        // 考勤日报综合分析路径（5表缺勤分析）
         if (isAttendanceFormType(intent.getFormType())) {
             return fillAttendanceAnalysis(resp, intent, req, intentResult.isAiGenerated());
+        }
+
+        // 非敏感4表直接明细分析路径（调休/事假/出差/疗休养）
+        if (isDirectTableFormType(intent.getFormType())) {
+            return fillDirectTableAnalysis(resp, intent, req);
         }
 
         Object summaryObj = queryAggregateSafely(intent);
@@ -85,6 +105,59 @@ public class JijianQueryChatServiceImpl implements JijianQueryChatService {
     private boolean isAttendanceFormType(String formType) {
         return JijianQueryFormTypeEnum.ATTENDANCE_DAILY.getValue().equals(formType)
                 || "ATTENDANCE".equals(formType);
+    }
+
+    private boolean isDirectTableFormType(String formType) {
+        return JijianQueryFormTypeEnum.COMPENSATORY_LEAVE.getValue().equals(formType)
+                || JijianQueryFormTypeEnum.PERSONAL_LEAVE.getValue().equals(formType)
+                || JijianQueryFormTypeEnum.BUSINESS_TRIP.getValue().equals(formType)
+                || JijianQueryFormTypeEnum.RECUPERATION_LEAVE.getValue().equals(formType);
+    }
+
+    private JijianQueryChatRespVO fillDirectTableAnalysis(JijianQueryChatRespVO resp,
+                                                           JijianAiQueryIntent intent,
+                                                           JijianQueryChatReqVO req) {
+        try {
+            String personName = intent.getPersonName();
+            // 本地兜底：从消息中提取人名
+            if (personName == null || personName.isBlank()) {
+                personName = extractPersonName(req.getMessage());
+            }
+            DirectAnalysisResult result = directTableAnalysisService.analyze(
+                    intent.getFormType(), intent.getDepartment(), personName, intent.getTimeRange());
+
+            resp.setMetrics(result.getMetrics());
+            resp.setCharts(result.getCharts());
+            resp.setTables(result.getTables());
+            resp.setDatabaseContextMeta(result.getDatabaseContextMeta());
+            resp.setData(Collections.emptyMap());
+            resp.setSummary(Collections.emptyMap());
+            resp.setPageResult(new PageResult<>(Collections.emptyList(), 0L));
+            resp.setColumns(Collections.emptyList());
+
+            String answer = deepSeekIntentClient.analyzeDirectTableData(result, req.getMessage());
+            resp.setAnswer(answer);
+            resp.setAiMode(JijianAiIntentClient.MODE_DEEPSEEK_DATA_ANALYSIS);
+        } catch (Exception e) {
+            log.error("[QueryChat] Direct table analysis failed, formType={}", intent.getFormType(), e);
+            resp.setAnswer("数据查询失败，请稍后重试。");
+            resp.setAiMode(JijianAiIntentClient.MODE_LOCAL_FALLBACK);
+        }
+        return resp;
+    }
+
+    /** 从自然语言中提取中文姓名（本地兜底，2-6个汉字） */
+    private String extractPersonName(String text) {
+        if (text == null || text.isBlank()) return null;
+        // 简单启发：查找"的"前面的2-4个汉字（常见：XX的调休记录）
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("([\\u4e00-\\u9fa5]{2,4})的(?:调休|事假|出差|疗休养)");
+        java.util.regex.Matcher m = p.matcher(text);
+        if (m.find()) return m.group(1);
+        // 查找部门名后紧跟的人名（如：综合管理部李芝琴）
+        java.util.regex.Pattern p2 = java.util.regex.Pattern.compile("(?:部|室|处|科|局|组|中心)([\\u4e00-\\u9fa5]{2,4})");
+        java.util.regex.Matcher m2 = p2.matcher(text);
+        if (m2.find()) return m2.group(1);
+        return null;
     }
 
     private JijianQueryChatRespVO fillAttendanceAnalysis(JijianQueryChatRespVO resp,
@@ -209,9 +282,10 @@ public class JijianQueryChatServiceImpl implements JijianQueryChatService {
             intent = buildDefaultIntent(req);
         }
 
-        intent.setFormType(resolveFormType(intent.getFormType(), req));
-        if (!isAllowedDepartment(intent.getDepartment(), intent.getFormType())) {
-            intent.setDepartment(defaultDepartment(req, intent.getFormType()));
+        String resolvedFormType = resolveFormType(intent.getFormType(), req);
+        intent.setFormType(resolvedFormType);
+        if (resolvedFormType != null && !isAllowedDepartment(intent.getDepartment(), resolvedFormType)) {
+            intent.setDepartment(defaultDepartment(req, resolvedFormType));
         }
         if (JijianQueryTimeRangeEnum.of(intent.getTimeRange()) == null) {
             intent.setTimeRange(defaultTimeRange(req));
@@ -235,13 +309,15 @@ public class JijianQueryChatServiceImpl implements JijianQueryChatService {
             intent.setAnalysisGoal(req.getMessage());
         }
         intent.setOriginalMessage(req.getMessage());
+        // personName 透传（来自 AI 解析，已在 parseAndValidateIntent 中做正则校验）
         return intent;
     }
 
     private JijianAiQueryIntent buildDefaultIntent(JijianQueryChatReqVO req) {
         JijianAiQueryIntent intent = new JijianAiQueryIntent();
-        intent.setFormType(resolveFormType(null, req));
-        intent.setDepartment(defaultDepartment(req, intent.getFormType()));
+        String formType = resolveFormType(null, req);
+        intent.setFormType(formType);
+        intent.setDepartment(ALL);
         intent.setTimeRange(defaultTimeRange(req));
         intent.setMetrics(DEFAULT_METRICS);
         intent.setNeedDetail(false);
@@ -272,9 +348,10 @@ public class JijianQueryChatServiceImpl implements JijianQueryChatService {
         return normalizeSupportedFormType(candidate);
     }
 
+    /** 返回 null 表示无法识别，交由调用方处理（不再默认 ATTENDANCE_DAILY） */
     private String normalizeSupportedFormType(String formType) {
         if (formType == null || formType.isBlank()) {
-            return JijianQueryFormTypeEnum.ATTENDANCE_DAILY.getValue();
+            return null;
         }
         if ("ATTENDANCE".equals(formType)) {
             return JijianQueryFormTypeEnum.ATTENDANCE_DAILY.getValue();
@@ -298,7 +375,7 @@ public class JijianQueryChatServiceImpl implements JijianQueryChatService {
         if (e != null && e.isSupported()) {
             return e.getValue();
         }
-        return JijianQueryFormTypeEnum.ATTENDANCE_DAILY.getValue();
+        return null;
     }
 
     private String inferFormType(String text) {
@@ -345,8 +422,11 @@ public class JijianQueryChatServiceImpl implements JijianQueryChatService {
         if (ALL.equals(department)) {
             return true;
         }
-        JijianFormQueryHandler handler = handlerRegistry.getHandlerOrNull(normalizeSupportedFormType(formType));
-        if (handler == null || department == null) {
+        if (formType == null || formType.isBlank() || department == null) {
+            return false;
+        }
+        JijianFormQueryHandler handler = handlerRegistry.getHandlerOrNull(formType);
+        if (handler == null) {
             return false;
         }
         return handler.getDepartments().stream().anyMatch(item -> department.equals(item.getValue()));

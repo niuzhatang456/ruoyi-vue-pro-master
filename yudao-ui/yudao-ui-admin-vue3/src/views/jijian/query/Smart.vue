@@ -1,169 +1,564 @@
 <template>
-  <PageShell title="智能查询" description="输入自然语言，AI 分析纪检数据并返回图表与结论。">
-
-    <!-- 聊天消息区 -->
-    <el-card shadow="never" class="mb-16px">
-      <div ref="chatBoxRef" class="chat-box">
-        <div v-if="chatMessages.length === 0" class="chat-empty">
-          <el-text type="info">
-            直接输入问题，例如：<br>
-            "分析这个月疗休养请假情况" &nbsp;·&nbsp; "查一下本月缺勤人员" &nbsp;·&nbsp; "统计各部门出勤率"
-          </el-text>
-        </div>
+  <div class="aigc-layout">
+    <!-- 左侧历史对话栏 -->
+    <div class="aigc-sidebar">
+      <div class="sidebar-top">
+        <el-button type="primary" class="new-chat-btn" @click="newConversation">
+          <el-icon><Plus /></el-icon> 新建对话
+        </el-button>
+      </div>
+      <div class="conv-list">
         <div
-          v-for="(msg, idx) in chatMessages"
-          :key="idx"
-          :class="['chat-msg', msg.role === 'user' ? 'chat-msg--user' : 'chat-msg--assistant']"
+          v-for="conv in conversations"
+          :key="conv.id"
+          :class="['conv-item', { 'conv-item--active': conv.id === currentConvId }]"
+          @click="switchConversation(conv.id)"
         >
-          <div class="chat-bubble">
-            <div class="chat-content">{{ msg.content }}</div>
-            <div v-if="msg.role === 'assistant' && msg.aiMode" class="chat-hint">
-              <el-tag :type="modeTagType(msg.aiMode)" size="small">{{ aiModeText(msg.aiMode) }}</el-tag>
-              <span v-if="msg.formType" class="ml-8px text-gray">{{ msg.formType }}</span>
+          <span class="conv-title">{{ conv.title }}</span>
+          <el-button
+            v-hasPermi="['jijian:query-history:delete']"
+            class="conv-del"
+            size="small"
+            text
+            @click.stop="deleteConversation(conv.id)"
+          >
+            <el-icon><Close /></el-icon>
+          </el-button>
+        </div>
+        <div v-if="conversations.length === 0" class="conv-empty">暂无历史对话</div>
+      </div>
+    </div>
+
+    <!-- 主聊天区 -->
+    <div class="aigc-main">
+      <!-- 欢迎区（无消息时） -->
+      <div v-if="currentMessages.length === 0" class="chat-welcome">
+        <div class="welcome-icon">🔍</div>
+        <h2 class="welcome-title">纪检数据智能分析</h2>
+        <p class="welcome-sub">输入自然语言，AI 分析本地数据库真实数据，返回图表与结论</p>
+        <div class="prompt-grid">
+          <div
+            v-for="p in promptExamples"
+            :key="p"
+            class="prompt-chip"
+            @click="sendPrompt(p)"
+          >
+            {{ p }}
+          </div>
+        </div>
+      </div>
+
+      <!-- 消息流 -->
+      <div v-else ref="messagesRef" class="messages-area">
+        <div
+          v-for="(msg, idx) in currentMessages"
+          :key="idx"
+          :class="['msg-row', msg.role === 'user' ? 'msg-row--user' : 'msg-row--ai']"
+        >
+          <div class="msg-avatar">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
+          <div class="msg-body">
+            <!-- 用户消息 -->
+            <div v-if="msg.role === 'user'" class="msg-bubble msg-bubble--user">
+              {{ msg.content }}
+            </div>
+
+            <!-- AI 消息 -->
+            <div v-else class="msg-bubble msg-bubble--ai">
+              <!-- loading 状态 -->
+              <div v-if="msg.loading" class="msg-loading">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+              </div>
+
+              <!-- 回答文本 -->
+              <div v-else>
+                <div class="msg-answer">{{ msg.content }}</div>
+
+                <!-- AI 模式标签 -->
+                <div v-if="msg.aiMode" class="msg-mode-tag">
+                  <el-tag :type="modeTagType(msg.aiMode)" size="small">{{ aiModeText(msg.aiMode) }}</el-tag>
+                </div>
+
+                <div class="msg-actions">
+                  <el-button size="small" type="primary" plain @click="handleDispose(msg, idx)">
+                    处置
+                  </el-button>
+                </div>
+
+                <!-- 指标卡片 -->
+                <el-row v-if="msg.metrics && msg.metrics.length" :gutter="12" class="result-metrics">
+                  <el-col
+                    v-for="m in msg.metrics"
+                    :key="m.key"
+                    :xs="12"
+                    :sm="8"
+                    :md="6"
+                    class="mb-8px"
+                  >
+                    <div class="metric-card">
+                      <div class="metric-val">
+                        {{ m.value }}<span v-if="m.unit" class="metric-unit">{{ m.unit }}</span>
+                      </div>
+                      <div class="metric-label">{{ m.label }}</div>
+                    </div>
+                  </el-col>
+                </el-row>
+
+                <!-- 图表区（仅最新 AI 消息渲染，旧消息显示占位） -->
+                <div v-if="msg.charts && msg.charts.length">
+                  <el-row v-if="idx === latestAiIdx" :gutter="12" class="result-charts">
+                    <el-col
+                      v-for="(chart, ci) in msg.charts"
+                      :key="ci"
+                      :xs="24"
+                      :md="12"
+                      class="mb-12px"
+                    >
+                      <div class="chart-card">
+                        <div class="chart-title">{{ chart.title }}</div>
+                        <div :ref="(el) => setChartRef(el, ci)" class="chart-dom"></div>
+                      </div>
+                    </el-col>
+                  </el-row>
+                  <div v-else class="chart-placeholder">
+                    [包含 {{ msg.charts.length }} 张图表，切换至该对话可查看]
+                  </div>
+                </div>
+
+                <!-- 数据表格 -->
+                <div v-if="msg.tables && msg.tables.length">
+                  <div v-for="(tbl, ti) in msg.tables" :key="ti" class="result-table">
+                    <div class="table-title">{{ tbl.title }}</div>
+                    <el-table :data="tbl.rows" stripe size="small" max-height="300">
+                      <el-table-column
+                        v-for="col in tbl.columns"
+                        :key="col.key"
+                        :prop="col.key"
+                        :label="col.label"
+                        min-width="100"
+                        show-overflow-tooltip
+                      />
+                    </el-table>
+                  </div>
+                </div>
+
+                <!-- 数据来源元信息 -->
+                <div v-if="msg.databaseContextMeta" class="db-meta">
+                  <span>数据来源：本地数据库只读查询</span>
+                  <span v-if="msg.databaseContextMeta.tablesUsed?.length">
+                    · 涉及表：{{ msg.databaseContextMeta.tablesUsed.join('、') }}
+                  </span>
+                  <span v-if="msg.databaseContextMeta.truncated" class="text-warning">
+                    · 数据量较大，已聚合展示
+                  </span>
+                </div>
+
+                <!-- SQL 查询痕迹（可折叠） -->
+                <div v-if="msg.sqlTrace && msg.sqlTrace.length" class="sql-trace-wrap">
+                  <div class="sql-trace-header" @click="msg.sqlTraceExpanded = !msg.sqlTraceExpanded">
+                    <span class="sql-trace-toggle">{{ msg.sqlTraceExpanded ? '▾' : '▸' }}</span>
+                    <span>查询痕迹（共执行 {{ msg.sqlTrace.length }} 条 SQL）</span>
+                  </div>
+                  <div v-if="msg.sqlTraceExpanded" class="sql-trace-body">
+                    <div v-for="(t, ti) in msg.sqlTrace" :key="ti" class="sql-trace-item">
+                      <div class="sql-trace-purpose">
+                        <span class="sql-trace-idx">#{{ ti + 1 }}</span>
+                        {{ t.purpose }}
+                        <el-tag v-if="t.error" type="danger" size="small" class="ml-4px">失败</el-tag>
+                        <el-tag v-else type="success" size="small" class="ml-4px">{{ t.rowCount }} 行</el-tag>
+                      </div>
+                      <pre class="sql-trace-sql">{{ t.sql }}</pre>
+                      <div v-if="t.error" class="sql-trace-error">{{ t.error }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="chat-input-area">
-        <el-input
-          v-model="chatInput"
-          :disabled="chatLoading"
-          placeholder="输入问题，按回车发送（无需选择表单类型）"
-          @keyup.enter="handleChat"
-        />
-        <el-button type="primary" :loading="chatLoading" :disabled="!chatInput.trim()" @click="handleChat">
-          发送
-        </el-button>
+      <!-- 底部输入区 -->
+      <div class="input-area">
+        <div class="input-wrap">
+          <el-input
+            v-model="chatInput"
+            :disabled="chatLoading"
+            type="textarea"
+            :autosize="{ minRows: 1, maxRows: 4 }"
+            placeholder="输入问题，例如：分析本月各部门出勤率 / 查询一年内缺勤最多的部门"
+            resize="none"
+            @keydown="handleKeydown"
+          />
+          <el-button
+            type="primary"
+            :loading="chatLoading"
+            :disabled="!chatInput.trim()"
+            class="send-btn"
+            @click="sendMessage"
+          >
+            发送
+          </el-button>
+        </div>
+        <div class="input-hint">Enter 发送 · Shift+Enter 换行</div>
       </div>
-    </el-card>
-
-    <!-- 分析结果区（指标、图表、表格） -->
-    <template v-if="chatAnalysisData">
-      <el-divider>智能分析结果</el-divider>
-
-      <!-- 指标卡片 -->
-      <el-row v-if="chatMetrics.length" :gutter="16" class="mb-16px">
-        <el-col v-for="m in chatMetrics" :key="m.key" :xs="12" :sm="8" :md="6" class="mb-8px">
-          <el-card shadow="never" class="stat-card">
-            <div class="stat-num">{{ m.value }}<span v-if="m.unit" class="stat-unit">{{ m.unit }}</span></div>
-            <div class="stat-label">{{ m.label }}</div>
-          </el-card>
-        </el-col>
-      </el-row>
-
-      <!-- 图表区 -->
-      <el-row v-if="chatCharts.length" :gutter="16" class="mb-16px">
-        <el-col v-for="(chart, idx) in chatCharts" :key="idx" :xs="24" :md="12" class="mb-16px">
-          <el-card shadow="never">
-            <template #header>{{ chart.title }}</template>
-            <div :ref="(el) => setChartRef(el, idx)" style="height: 280px"></div>
-          </el-card>
-        </el-col>
-      </el-row>
-
-      <!-- 数据表格 -->
-      <template v-for="(tbl, idx) in chatTables" :key="idx">
-        <el-card shadow="never" class="mb-16px">
-          <template #header>{{ tbl.title }}</template>
-          <el-table :data="tbl.rows" stripe size="small" max-height="320">
-            <el-table-column
-              v-for="col in tbl.columns"
-              :key="col.key"
-              :prop="col.key"
-              :label="col.label"
-              min-width="100"
-              show-overflow-tooltip
-            />
-          </el-table>
-        </el-card>
-      </template>
-    </template>
-
-    <!-- 普通 summary（非图表化时） -->
-    <template v-if="chatSummaryRaw && !chatAnalysisData">
-      <el-divider>统计结果</el-divider>
-      <SummaryPanel :summary="chatSummaryRaw" />
-    </template>
-  </PageShell>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import PageShell from '../components/PageShell.vue'
-import { computed, defineComponent, nextTick, onMounted, onUnmounted, ref, watch, type PropType } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { Plus, Close } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import {
   JijianQueryApi,
   type JijianMetricVO,
   type JijianChartVO,
-  type JijianAnalysisTableVO
+  type JijianAnalysisTableVO,
+  type JijianDatabaseContextMetaVO,
+  type JijianSqlTraceVO
 } from '@/api/jijian/query'
-import { ElMessage } from 'element-plus'
+import { QueryHistoryApi, type QueryHistoryVO } from '@/api/jijian/queryHistory'
+import { DisposalRecordApi } from '@/api/jijian/disposalRecord'
 
-// ===== SummaryPanel =====
-const SummaryPanel = defineComponent({
-  name: 'SummaryPanel',
-  props: { summary: { type: Object as PropType<Record<string, unknown>>, required: true } },
-  setup(props) {
-    const primitiveEntries = computed(() =>
-      Object.entries(props.summary)
-        .filter(([, v]) => !Array.isArray(v) && v !== null && typeof v !== 'object')
-        .map(([key, value]) => ({ key, label: key, value: String(value) }))
-    )
-    const arrayEntries = computed(() =>
-      Object.entries(props.summary)
-        .filter(([, v]) => Array.isArray(v))
-        .map(([key, value]) => ({ key, label: key, rows: value as Record<string, unknown>[] }))
-    )
-    const rowColumns = (rows: Record<string, unknown>[]) => {
-      const first = rows.find((r) => r && typeof r === 'object')
-      return first ? Object.keys(first).slice(0, 8) : []
-    }
-    return { primitiveEntries, arrayEntries, rowColumns }
-  },
-  template: `
-    <div>
-      <el-row v-if="primitiveEntries.length" :gutter="16" class="mb-16px">
-        <el-col v-for="item in primitiveEntries" :key="item.key" :xs="12" :sm="8" :md="6">
-          <el-card shadow="never" class="stat-card">
-            <div class="stat-num">{{ item.value }}</div>
-            <div class="stat-label">{{ item.label }}</div>
-          </el-card>
-        </el-col>
-      </el-row>
-      <el-row :gutter="16">
-        <el-col v-for="entry in arrayEntries" :key="entry.key" :xs="24" :md="12" class="mb-16px">
-          <el-card shadow="never">
-            <template #header>{{ entry.label }}</template>
-            <el-table :data="entry.rows" size="small" stripe max-height="260">
-              <el-table-column v-for="col in rowColumns(entry.rows)" :key="col" :prop="col" :label="col" min-width="100" show-overflow-tooltip />
-            </el-table>
-          </el-card>
-        </el-col>
-      </el-row>
-    </div>
-  `
-})
-
-// ===== 状态 =====
+// ===== 类型定义 =====
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  timestamp: number
+  loading?: boolean
   aiMode?: string
-  formType?: string
+  metrics?: JijianMetricVO[]
+  charts?: JijianChartVO[]
+  tables?: JijianAnalysisTableVO[]
+  databaseContextMeta?: JijianDatabaseContextMetaVO
+  sqlTrace?: JijianSqlTraceVO[]
+  sqlTraceExpanded?: boolean
+  queryHistoryId?: number
+  queryResultJson?: string
 }
 
-const chatMessages = ref<ChatMessage[]>([])
+interface Conversation {
+  id: string
+  title: string
+  createdAt: string
+  messages: ChatMessage[]
+  conversationId?: string
+  serverHistoryId?: number
+}
+
+// ===== 提示词示例 =====
+const promptExamples = [
+  '综合管理部有哪些人调休，分别调休多久',
+  '各部门调休次数和调休时长对比',
+  '查询一年内缺勤人数最多的部门是哪个',
+  '查询本月缺卡人员，判断是否因请假、出差或疗休养导致',
+  '分析各部门疗休养请假天数情况',
+  '帮我分析一下最近一年各部门考勤、请假、出差、调休情况，有没有异常',
+  '分析食堂供应商不同采价点的价格差异',
+]
+
+// ===== localStorage 持久化 =====
+const STORAGE_KEY = 'jijian_conversations'
+
+const loadConversations = (): Conversation[] => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+const saveConversations = (list: Conversation[]) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
+  } catch {
+    // localStorage 不可用时静默忽略
+  }
+}
+
+// ===== 状态 =====
+const conversations = ref<Conversation[]>(loadConversations())
+const currentConvId = ref<string | null>(
+  conversations.value.length > 0 ? conversations.value[0].id : null
+)
+
+const currentConv = computed<Conversation | null>(() =>
+  conversations.value.find((c) => c.id === currentConvId.value) ?? null
+)
+
+const currentMessages = computed<ChatMessage[]>(() => currentConv.value?.messages ?? [])
+
+const latestAiIdx = computed<number>(() => {
+  const msgs = currentMessages.value
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'assistant' && !msgs[i].loading) return i
+  }
+  return -1
+})
+
 const chatInput = ref('')
 const chatLoading = ref(false)
-const chatBoxRef = ref<HTMLElement>()
-const conversationId = ref<string | undefined>(undefined)
+const messagesRef = ref<HTMLElement>()
 
-const chatAnalysisData = ref(false)
-const chatMetrics = ref<JijianMetricVO[]>([])
-const chatCharts = ref<JijianChartVO[]>([])
-const chatTables = ref<JijianAnalysisTableVO[]>([])
-const chatSummaryRaw = ref<Record<string, unknown> | null>(null)
+// ===== 对话管理 =====
+const genId = () => Math.random().toString(36).slice(2) + Date.now().toString(36)
+
+const newConversation = () => {
+  disposeCharts()
+  const conv: Conversation = {
+    id: genId(),
+    title: '新对话',
+    createdAt: new Date().toISOString(),
+    messages: [],
+  }
+  conversations.value.unshift(conv)
+  currentConvId.value = conv.id
+  saveConversations(conversations.value)
+}
+
+const switchConversation = async (id: string) => {
+  if (id === currentConvId.value) return
+  disposeCharts()
+  currentConvId.value = id
+  const conv = conversations.value.find((item) => item.id === id)
+  if (conv?.serverHistoryId && conv.messages.length === 0) {
+    const history = await QueryHistoryApi.get(conv.serverHistoryId)
+    conv.messages = historyToMessages(history)
+  }
+  nextTick(() => scrollBottom())
+}
+
+const deleteConversation = async (id: string) => {
+  const conv = conversations.value.find((item) => item.id === id)
+  if (conv?.serverHistoryId) {
+    await ElMessageBox.confirm('确认删除这条查询历史吗？', '删除确认', { type: 'warning' })
+    await QueryHistoryApi.delete(conv.serverHistoryId)
+  }
+  if (currentConvId.value === id) {
+    disposeCharts()
+  }
+  conversations.value = conversations.value.filter((c) => c.id !== id)
+  if (currentConvId.value === id) {
+    currentConvId.value = conversations.value.length > 0 ? conversations.value[0].id : null
+  }
+  saveConversations(conversations.value)
+  ElMessage.success('查询历史已删除')
+}
+
+const ensureConversation = (): Conversation => {
+  if (!currentConv.value) {
+    newConversation()
+  }
+  return currentConv.value!
+}
+
+const updateConvTitle = (conv: Conversation, firstUserMsg: string) => {
+  if (conv.title === '新对话' || conv.title === '') {
+    conv.title = firstUserMsg.slice(0, 20)
+  }
+}
+
+// ===== 发送消息 =====
+const sendPrompt = (text: string) => {
+  chatInput.value = text
+  sendMessage()
+}
+
+const handleKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    sendMessage()
+  }
+}
+
+const sendMessage = async () => {
+  const msg = chatInput.value.trim()
+  if (!msg || chatLoading.value) return
+
+  chatInput.value = ''
+  const conv = ensureConversation()
+
+  // 加入用户消息
+  const userMsg: ChatMessage = { role: 'user', content: msg, timestamp: Date.now() }
+  conv.messages.push(userMsg)
+  updateConvTitle(conv, msg)
+  await scrollBottom()
+
+  // 加入 loading 占位
+  const loadingMsg: ChatMessage = {
+    role: 'assistant',
+    content: '',
+    timestamp: Date.now(),
+    loading: true,
+  }
+  conv.messages.push(loadingMsg)
+  saveConversations(conversations.value)
+
+  // 构建历史（不含 loading）
+  const history = conv.messages
+    .filter((m) => !m.loading)
+    .slice(0, -1)
+    .slice(-12)
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+
+  chatLoading.value = true
+  try {
+    const resp = await JijianQueryApi.agentChat({
+      conversationId: conv.conversationId,
+      formType: null as any,
+      department: null as any,
+      timeRange: 'ALL',
+      message: msg,
+      history,
+    })
+
+    conv.conversationId = resp.conversationId
+    conv.serverHistoryId = resp.queryHistoryId
+
+    // 替换 loading 消息
+    const idx = conv.messages.indexOf(loadingMsg)
+    const aiMsg: ChatMessage = {
+      role: 'assistant',
+      content: resp.answer ?? '',
+      timestamp: Date.now(),
+      aiMode: resp.aiMode,
+      metrics: resp.metrics ?? [],
+      charts: resp.charts ?? [],
+      tables: resp.tables ?? [],
+      databaseContextMeta: resp.databaseContextMeta,
+      sqlTrace: resp.sqlTrace ?? [],
+      sqlTraceExpanded: false,
+      queryHistoryId: resp.queryHistoryId,
+      queryResultJson: JSON.stringify({
+        data: resp.data,
+        summary: resp.summary,
+        columns: resp.columns,
+        pageResult: resp.pageResult,
+        metrics: resp.metrics,
+        charts: resp.charts,
+        tables: resp.tables,
+        sqlTrace: resp.sqlTrace
+      }),
+    }
+    if (idx >= 0) {
+      conv.messages.splice(idx, 1, aiMsg)
+    } else {
+      conv.messages.push(aiMsg)
+    }
+  } catch (e: any) {
+    const idx = conv.messages.indexOf(loadingMsg)
+    const errMsg: ChatMessage = {
+      role: 'assistant',
+      content: buildErrorMessage(e),
+      timestamp: Date.now(),
+    }
+    if (idx >= 0) {
+      conv.messages.splice(idx, 1, errMsg)
+    } else {
+      conv.messages.push(errMsg)
+    }
+  } finally {
+    chatLoading.value = false
+    saveConversations(conversations.value)
+    await scrollBottom()
+  }
+}
+
+const parseJson = (value?: string) => {
+  if (!value) return {}
+  try { return JSON.parse(value) } catch { return {} }
+}
+
+const historyToMessages = (history: QueryHistoryVO): ChatMessage[] => {
+  const result = parseJson(history.queryResultJson)
+  return [
+    {
+      role: 'user',
+      content: history.question,
+      timestamp: new Date(history.createTime).getTime()
+    },
+    {
+      role: 'assistant',
+      content: history.answer || history.errorMessage || '',
+      timestamp: new Date(history.createTime).getTime(),
+      aiMode: history.modelName,
+      metrics: result.metrics || [],
+      charts: result.charts || [],
+      tables: result.tables || [],
+      databaseContextMeta: parseJson(history.databaseContextMetaJson),
+      sqlTrace: result.sqlTrace || [],
+      sqlTraceExpanded: false,
+      queryHistoryId: history.id,
+      queryResultJson: history.queryResultJson
+    }
+  ]
+}
+
+const loadRemoteHistory = async () => {
+  try {
+    const page = await QueryHistoryApi.getPage({ pageNo: 1, pageSize: 30 })
+    if (!page.list.length) return
+    conversations.value = page.list.map((item) => ({
+      id: `history-${item.id}`,
+      title: item.question.slice(0, 20),
+      createdAt: item.createTime,
+      messages: [],
+      serverHistoryId: item.id
+    }))
+    currentConvId.value = conversations.value[0]?.id || null
+    if (currentConvId.value) {
+      await switchConversation(currentConvId.value)
+      const first = conversations.value[0]
+      if (first?.serverHistoryId && first.messages.length === 0) {
+        first.messages = historyToMessages(await QueryHistoryApi.get(first.serverHistoryId))
+      }
+    }
+  } catch {
+    // 后端历史暂不可用时保留 localStorage 兼容数据
+  }
+}
+
+const handleDispose = async (message: ChatMessage, index: number) => {
+  const question = [...currentMessages.value.slice(0, index)]
+    .reverse()
+    .find((item) => item.role === 'user')?.content
+  const { value } = await ElMessageBox.prompt('请输入处置意见', '保存处置记录', {
+    confirmButtonText: '保存',
+    cancelButtonText: '取消',
+    inputType: 'textarea',
+    inputValidator: (input) => Boolean(input?.trim()) || '处置意见不能为空'
+  })
+  await DisposalRecordApi.create({
+    queryHistoryId: message.queryHistoryId,
+    queryQuestion: question,
+    queryAnswer: message.content,
+    queryResultJson: message.queryResultJson,
+    disposalOpinion: value.trim(),
+    sourceModule: 'smart_query'
+  })
+  ElMessage.success('处置记录已保存')
+}
+
+const buildErrorMessage = (e: any): string => {
+  const status = e?.response?.status ?? e?.status
+  const msg = e?.response?.data?.msg ?? e?.message
+  if (status === 401) return '查询失败：请重新登录后重试。'
+  if (msg && /Network Error|timeout|Failed to fetch/i.test(String(msg)))
+    return '查询失败：服务不可用，请确认后端已启动。'
+  return '查询失败：' + (msg ?? '服务异常，请稍后重试')
+}
+
+// ===== 滚动到底部 =====
+const scrollBottom = async () => {
+  await nextTick()
+  if (messagesRef.value) {
+    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+  }
+}
 
 // ===== ECharts =====
 const chartRefs = ref<(HTMLElement | null)[]>([])
@@ -174,17 +569,21 @@ const setChartRef = (el: unknown, idx: number) => {
 }
 
 const disposeCharts = () => {
-  chartInstances.forEach((inst) => { try { inst.dispose() } catch (_) {} })
+  chartInstances.forEach((inst) => {
+    try {
+      inst.dispose()
+    } catch (_) {}
+  })
   chartInstances.length = 0
+  chartRefs.value = []
 }
 
-const renderCharts = async () => {
+const renderCharts = async (charts: JijianChartVO[]) => {
   await nextTick()
   disposeCharts()
-  chartRefs.value.forEach((el, idx) => {
+  charts.forEach((chart, idx) => {
+    const el = chartRefs.value[idx]
     if (!el) return
-    const chart = chatCharts.value[idx]
-    if (!chart) return
     const inst = echarts.init(el)
     chartInstances.push(inst)
     inst.setOption(buildEchartsOption(chart))
@@ -196,90 +595,52 @@ const buildEchartsOption = (chart: JijianChartVO): echarts.EChartsOption => {
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
       legend: { orient: 'vertical', right: 10, top: 'center' },
-      series: [{ type: 'pie', radius: ['40%', '70%'], center: ['40%', '50%'],
-        data: (chart.data ?? []).map((d) => ({ name: d.name, value: d.value })) }]
+      series: [{
+        type: 'pie',
+        radius: ['40%', '70%'],
+        center: ['40%', '50%'],
+        data: (chart.data ?? []).map((d) => ({ name: d.name, value: d.value })),
+      }],
     }
   }
   if (chart.type === 'bar') {
     return {
-      tooltip: { trigger: 'axis' }, legend: { bottom: 0 },
+      tooltip: { trigger: 'axis' },
+      legend: { bottom: 0 },
       grid: { left: '3%', right: '4%', bottom: '14%', containLabel: true },
       xAxis: { type: 'category', data: chart.xAxis ?? [], axisLabel: { rotate: 30 } },
       yAxis: { type: 'value' },
-      series: (chart.series ?? []).map((s) => ({ name: s.name, type: 'bar', data: s.data }))
+      series: (chart.series ?? []).map((s) => ({ name: s.name, type: 'bar', data: s.data })),
     }
   }
   if (chart.type === 'line') {
     return {
-      tooltip: { trigger: 'axis' }, legend: { bottom: 0 },
+      tooltip: { trigger: 'axis' },
+      legend: { bottom: 0 },
       grid: { left: '3%', right: '4%', bottom: '14%', containLabel: true },
       xAxis: { type: 'category', data: chart.xAxis ?? [] },
       yAxis: { type: 'value' },
-      series: (chart.series ?? []).map((s) => ({ name: s.name, type: 'line', data: s.data, smooth: true }))
+      series: (chart.series ?? []).map((s) => ({ name: s.name, type: 'line', data: s.data, smooth: true })),
     }
   }
   return {}
 }
 
-watch(chatCharts, () => { if (chatCharts.value.length) renderCharts() }, { flush: 'post' })
-
-const scrollChatBottom = async () => {
-  await nextTick()
-  if (chatBoxRef.value) chatBoxRef.value.scrollTop = chatBoxRef.value.scrollHeight
-}
-
-// ===== 发送 chat =====
-const handleChat = async () => {
-  const msg = chatInput.value.trim()
-  if (!msg) return
-  chatMessages.value.push({ role: 'user', content: msg })
-  chatInput.value = ''
-  await scrollChatBottom()
-
-  const history = chatMessages.value
-    .slice(0, -1)
-    .slice(-12)
-    .map((m) => ({ role: m.role, content: m.content }))
-
-  chatLoading.value = true
-  try {
-    const resp = await JijianQueryApi.chat({
-      conversationId: conversationId.value,
-      formType: null as any,      // 不传 formType，由后端/AI 自动判断
-      department: null as any,
-      timeRange: 'ALL',
-      message: msg,
-      history
-    })
-    conversationId.value = resp.conversationId
-    chatMessages.value.push({
-      role: 'assistant',
-      content: resp.answer,
-      aiMode: resp.aiMode,
-      formType: resp.formType ?? resp.queryIntent?.formType as string
-    })
-
-    if (resp.aiMode === 'DEEPSEEK_DATA_ANALYSIS' && resp.metrics?.length) {
-      chatAnalysisData.value = true
-      chatMetrics.value = resp.metrics ?? []
-      chatCharts.value = resp.charts ?? []
-      chatTables.value = resp.tables ?? []
-      chatSummaryRaw.value = null
-    } else {
-      chatAnalysisData.value = false
-      const s = (resp.summary ?? resp.data ?? {}) as Record<string, unknown>
-      chatSummaryRaw.value = Object.keys(s).length > 0 ? s : null
-    }
-  } catch (e: any) {
-    chatMessages.value.push({ role: 'assistant', content: buildChatErrorMessage(e) })
-  } finally {
-    chatLoading.value = false
-    await scrollChatBottom()
+// 当 latestAiIdx 变化且有图表时，重新渲染
+watch(latestAiIdx, async (idx) => {
+  if (idx < 0) return
+  const msg = currentMessages.value[idx]
+  if (msg?.charts?.length) {
+    await renderCharts(msg.charts)
+  } else {
+    disposeCharts()
   }
-}
+}, { flush: 'post' })
 
+// ===== 工具函数 =====
 const aiModeText = (mode?: string) => {
   switch (mode) {
+    case 'DEEPSEEK_SQL_AGENT': return 'SQL Agent 全量分析'
     case 'DEEPSEEK_DATA_ANALYSIS': return 'DeepSeek 数据分析'
     case 'DEEPSEEK_SUMMARY': return 'DeepSeek 摘要'
     case 'DEEPSEEK_INTENT': return 'DeepSeek 解析'
@@ -288,41 +649,464 @@ const aiModeText = (mode?: string) => {
   }
 }
 
-const modeTagType = (mode?: string): 'success' | 'info' | 'warning' => {
-  if (mode === 'DEEPSEEK_DATA_ANALYSIS' || mode === 'DEEPSEEK_SUMMARY') return 'success'
+const modeTagType = (mode?: string): 'success' | 'warning' | 'info' => {
+  if (mode === 'DEEPSEEK_SQL_AGENT' || mode === 'DEEPSEEK_DATA_ANALYSIS' || mode === 'DEEPSEEK_SUMMARY') return 'success'
   if (mode === 'DEEPSEEK_INTENT') return 'warning'
   return 'info'
 }
 
-const buildChatErrorMessage = (e: any) => {
-  const msg = e?.response?.data?.msg ?? e?.message
-  if (/401/.test(String(e?.response?.status ?? e?.status))) return '查询失败：请重新登录。'
-  if (msg && /Network Error|timeout|Failed to fetch/i.test(String(msg))) return '查询失败：服务不可用，请确认后端已启动。'
-  return '查询失败：' + (msg ?? '服务异常，请稍后重试')
-}
-
-onMounted(() => {})
-onUnmounted(() => { disposeCharts() })
+onMounted(loadRemoteHistory)
+onUnmounted(() => disposeCharts())
 </script>
 
 <style scoped>
-.chat-box { height: 360px; overflow-y: auto; padding: 8px 0; display: flex; flex-direction: column; gap: 12px; }
-.chat-empty { display: flex; align-items: center; justify-content: center; height: 100%; text-align: center; }
-.chat-msg { display: flex; }
-.chat-msg--user { justify-content: flex-end; }
-.chat-msg--assistant { justify-content: flex-start; }
-.chat-bubble { max-width: 85%; padding: 8px 12px; border-radius: 8px; background: var(--el-fill-color-light); font-size: 14px; line-height: 1.6; }
-.chat-msg--user .chat-bubble { background: var(--el-color-primary-light-9); }
-.chat-content { white-space: pre-wrap; word-break: break-word; }
-.chat-hint { margin-top: 6px; display: flex; align-items: center; gap: 4px; }
-.text-gray { font-size: 11px; color: var(--el-text-color-placeholder); }
-.chat-input-area { display: flex; gap: 8px; margin-top: 12px; }
-.chat-input-area .el-input { flex: 1; }
-.stat-card { text-align: center; padding: 8px 0; }
-.stat-num { font-size: 24px; font-weight: 700; color: var(--el-color-primary); line-height: 1.2; }
-.stat-unit { font-size: 14px; font-weight: 400; margin-left: 2px; }
-.stat-label { font-size: 13px; color: var(--el-text-color-secondary); margin-top: 4px; }
-.mb-16px { margin-bottom: 16px; }
-.mb-8px { margin-bottom: 8px; }
-.ml-8px { margin-left: 8px; }
+/* ===== 整体布局 ===== */
+.aigc-layout {
+  display: flex;
+  height: calc(100vh - 84px);
+  background: var(--el-bg-color-page);
+  overflow: hidden;
+}
+
+/* ===== 左侧历史栏 ===== */
+.aigc-sidebar {
+  width: 240px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--el-border-color-light);
+  background: var(--el-bg-color);
+  overflow: hidden;
+}
+
+.sidebar-top {
+  padding: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.new-chat-btn {
+  width: 100%;
+}
+
+.conv-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.conv-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  margin: 2px 6px;
+  transition: background 0.15s;
+}
+
+.conv-item:hover {
+  background: var(--el-fill-color-light);
+}
+
+.conv-item--active {
+  background: var(--el-color-primary-light-9);
+}
+
+.conv-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+}
+
+.conv-del {
+  opacity: 0;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.conv-item:hover .conv-del {
+  opacity: 1;
+}
+
+.conv-empty {
+  padding: 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--el-text-color-placeholder);
+}
+
+/* ===== 主聊天区 ===== */
+.aigc-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ===== 欢迎区 ===== */
+.chat-welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  text-align: center;
+  overflow-y: auto;
+}
+
+.welcome-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.welcome-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin: 0 0 8px;
+}
+
+.welcome-sub {
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+  margin: 0 0 24px;
+}
+
+.prompt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  max-width: 700px;
+  width: 100%;
+}
+
+.prompt-chip {
+  padding: 10px 14px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  color: var(--el-text-color-regular);
+  background: var(--el-bg-color);
+  transition: all 0.15s;
+  line-height: 1.5;
+}
+
+.prompt-chip:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+/* ===== 消息流 ===== */
+.messages-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.msg-row {
+  display: flex;
+  gap: 10px;
+}
+
+.msg-row--user {
+  flex-direction: row-reverse;
+}
+
+.msg-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  background: var(--el-color-primary-light-8);
+  color: var(--el-color-primary);
+}
+
+.msg-row--user .msg-avatar {
+  background: var(--el-color-success-light-8);
+  color: var(--el-color-success);
+}
+
+.msg-body {
+  max-width: 80%;
+  min-width: 60px;
+}
+
+.msg-bubble {
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1.8;
+  word-break: break-word;
+}
+
+.msg-bubble--user {
+  background: var(--el-color-primary);
+  color: #fff;
+  border-radius: 10px 2px 10px 10px;
+}
+
+.msg-bubble--ai {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 2px 10px 10px 10px;
+}
+
+/* loading 动画 */
+.msg-loading {
+  display: flex;
+  gap: 5px;
+  padding: 4px 0;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--el-text-color-placeholder);
+  animation: blink 1.2s infinite;
+}
+
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+.msg-answer {
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.msg-mode-tag {
+  margin-bottom: 10px;
+}
+
+.msg-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+/* 指标卡片 */
+.result-metrics {
+  margin-top: 12px;
+  margin-bottom: 4px;
+}
+
+.mb-8px {
+  margin-bottom: 8px;
+}
+
+.metric-card {
+  text-align: center;
+  padding: 12px 8px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+}
+
+.metric-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+  line-height: 1.2;
+}
+
+.metric-unit {
+  font-size: 13px;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+.metric-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
+}
+
+/* 图表 */
+.result-charts {
+  margin-top: 12px;
+}
+
+.mb-12px {
+  margin-bottom: 12px;
+}
+
+.chart-card {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--el-fill-color-blank);
+}
+
+.chart-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 8px;
+}
+
+.chart-dom {
+  height: 260px;
+}
+
+.chart-placeholder {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  font-style: italic;
+}
+
+/* 数据表格 */
+.result-table {
+  margin-top: 12px;
+}
+
+.table-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 6px;
+}
+
+/* 数据来源 */
+.db-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.text-warning {
+  color: var(--el-color-warning);
+}
+
+/* ===== SQL 查询痕迹 ===== */
+.sql-trace-wrap {
+  margin-top: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.sql-trace-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--el-fill-color-light);
+  cursor: pointer;
+  color: var(--el-text-color-secondary);
+  user-select: none;
+}
+
+.sql-trace-header:hover {
+  background: var(--el-fill-color);
+}
+
+.sql-trace-toggle {
+  font-size: 10px;
+}
+
+.sql-trace-body {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sql-trace-item {
+  border-left: 3px solid var(--el-color-primary-light-5);
+  padding-left: 8px;
+}
+
+.sql-trace-purpose {
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  margin-bottom: 4px;
+}
+
+.sql-trace-idx {
+  display: inline-block;
+  background: var(--el-color-primary);
+  color: white;
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-right: 4px;
+  font-size: 10px;
+}
+
+.sql-trace-sql {
+  background: var(--el-fill-color);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--el-text-color-regular);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.sql-trace-error {
+  color: var(--el-color-danger);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.ml-4px {
+  margin-left: 4px;
+}
+
+/* ===== 输入区 ===== */
+.input-area {
+  border-top: 1px solid var(--el-border-color-light);
+  padding: 12px 16px;
+  background: var(--el-bg-color);
+}
+
+.input-wrap {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.input-wrap :deep(.el-textarea__inner) {
+  resize: none;
+  line-height: 1.6;
+}
+
+.send-btn {
+  flex-shrink: 0;
+  height: 36px;
+}
+
+.input-hint {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  margin-top: 6px;
+  text-align: center;
+}
 </style>

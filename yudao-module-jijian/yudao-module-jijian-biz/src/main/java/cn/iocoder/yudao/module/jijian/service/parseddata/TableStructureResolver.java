@@ -44,10 +44,21 @@ public final class TableStructureResolver {
             Arrays.asList("房产名称"),
             Arrays.asList("产权信息", "产权"),
             Arrays.asList("面积"),
-            Arrays.asList("租赁情况"));
+            Arrays.asList("租赁情况"),
+            Arrays.asList("出租方", "甲方", "出租人"),
+            Arrays.asList("承租方", "乙方", "承租人"),
+            Arrays.asList("合同编号", "合同号"),
+            Arrays.asList("租金", "月租", "租费"),
+            Arrays.asList("支付情况", "付款情况", "支付状态"),
+            Arrays.asList("合同期", "合同期限", "租期"),
+            Arrays.asList("合同内容摘要", "合同摘要", "摘要", "合同内容"));
     private static final List<String> REJECT_WORDS = Arrays.asList(
             "日期：", "日期:", "发布时间", "信息来源", "访问次数", "配送单", "公告", "标题");
     private static final List<String> SUMMARY_WORDS = Arrays.asList("小计", "合计", "总计");
+    /** 仅用于数据行跳过：供应商落款行、客户签字行等非商品行 */
+    private static final List<String> DATA_REJECT_WORDS = Arrays.asList(
+            "供应商：", "供应商:", "供货商：", "供货商:", "配送单位：", "配送单位:",
+            "客户签字", "签字：", "签字:", "签名：", "签名:");
 
     private TableStructureResolver() {
     }
@@ -195,12 +206,20 @@ public final class TableStructureResolver {
         if (containsAny(joined, REJECT_WORDS)) {
             return true;
         }
+        if (containsAny(joined, DATA_REJECT_WORDS)) {
+            return true;
+        }
         return scoreHeader(cells) >= 20;
     }
 
     private static boolean shouldFillDown(String header) {
         String normalized = normalize(header);
-        return containsAny(normalized, Arrays.asList("采价点", "采样点", "采购点", "价格采集点", "部门", "所在部门", "科室"));
+        // 注意：姓名/员工编号不做 fillDown（合并单元格由 JijianExcelMergedCellUtils 展开处理，
+        // 此处 fillDown 仅用于"同一天跨多行共享字段"场景，不应填充到不同人的行中）
+        return containsAny(normalized, Arrays.asList("采价点", "采样点", "采购点", "价格采集点",
+                "部门", "所在部门", "科室",
+                "日期", "考勤日期", "打卡日期",
+                "星期"));
     }
 
     private static List<String> cleanRow(List<String> row) {

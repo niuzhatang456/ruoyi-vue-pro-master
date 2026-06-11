@@ -24,6 +24,7 @@ public interface ErrorCodeConstants {
     ErrorCode PARSED_DATA_FORM_TYPE_UNRECOGNIZED  = new ErrorCode(1_050_002_008, "无法识别文件业务类型，请确认文件包含房产/租赁/合同/考勤/疗休养/事假/出差/调休/食堂等关键字");
     ErrorCode PARSED_DATA_FILE_FORMAT_UNSUPPORTED = new ErrorCode(1_050_002_009, "不支持的文件格式，请上传 Excel(.xls/.xlsx)、CSV 或图片(JPG/PNG)/PDF");
     ErrorCode PARSED_DATA_HEADERS_MISSING         = new ErrorCode(1_050_002_010, "文件第一行表头全为空，请检查文件格式");
+    ErrorCode PARSED_DATA_FILE_INVALID             = new ErrorCode(1_050_002_011, "上传文件为空、过大、扩展名异常或文件内容与格式不一致");
 
     // ========== OCR 服务 1-050-003-xxx ==========
     ErrorCode OCR_SERVICE_NOT_ENABLED = new ErrorCode(1_050_003_000, "OCR 识别服务未启用，请改用 Excel 或 CSV 上传，或联系管理员配置本地 OCR 服务");
@@ -37,5 +38,9 @@ public interface ErrorCodeConstants {
     // ========== 确认写入 1-050-004-xxx ==========
     ErrorCode CONFIRM_WRITE_DB_ERROR   = new ErrorCode(1_050_004_000, "数据库写入失败，请稍后重试或联系管理员");
     ErrorCode CONFIRM_WRITE_CONCURRENT = new ErrorCode(1_050_004_001, "该记录正在被其他操作处理，请稍后重试");
+
+    // ========== 查询历史、处置记录 1-050-005-xxx ==========
+    ErrorCode QUERY_HISTORY_NOT_EXISTS = new ErrorCode(1_050_005_000, "查询历史不存在或无权访问");
+    ErrorCode DISPOSAL_RECORD_NOT_EXISTS = new ErrorCode(1_050_005_001, "处置记录不存在或无权访问");
 
 }

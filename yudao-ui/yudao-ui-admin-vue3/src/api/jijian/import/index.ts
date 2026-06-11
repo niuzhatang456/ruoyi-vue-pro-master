@@ -109,6 +109,16 @@ export interface ConfirmWriteResultVO {
   confirmedIds: number[]
   confirmedCount: number
   idempotent: boolean
+  /** 原始解析总行数 */
+  totalRows?: number
+  /** 跳过行数（空白行/合计行） */
+  skippedRows?: number
+  /** 失败行数（有业务字段但关键字段缺失或解析异常） */
+  failedRows?: number
+  /** 跳过行原因列表（最多 20 条） */
+  skippedMessages?: string[]
+  /** 失败行原因列表（最多 20 条） */
+  failedMessages?: string[]
 }
 
 /** 通用确认写入（所有9种业务类型） */
@@ -136,5 +146,19 @@ export const saveCorrection = async (parsedDataId: number | string, correctedJso
 export const getParsedDataDetail = async (parsedDataId: number | string) => {
   return await request.get<ParsedDataVO>({
     url: `/jijian/import/parsed/detail/${parsedDataId}`
+  })
+}
+
+export interface DeleteBusinessDataVO {
+  parsedDataId: number
+  businessTable: string
+  deletedRows: number
+  message: string
+}
+
+/** 删除某次导入批次写入的业务数据（仅删 source_parsed_data_id 匹配的记录） */
+export const deleteBusinessData = async (parsedDataId: number | string) => {
+  return await request.delete<DeleteBusinessDataVO>({
+    url: `/jijian/import/parsed/${parsedDataId}/business-data`
   })
 }

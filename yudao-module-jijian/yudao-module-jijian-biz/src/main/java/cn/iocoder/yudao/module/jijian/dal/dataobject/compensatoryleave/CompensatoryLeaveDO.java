@@ -26,7 +26,7 @@ public class CompensatoryLeaveDO extends TenantBaseDO {
     private LocalDateTime compensatoryEndTime;
     private String compensatoryEndShift;
     private String compensatoryDuration;
-    private Boolean isOutside;
+    private String isOutside;         // 原文：出义/不出义/是/否
     private String outsideLocation;
     private String remark;
     private Long sourceParsedDataId;

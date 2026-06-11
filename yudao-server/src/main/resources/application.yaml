@@ -35,6 +35,10 @@ server:
       enabled: true
       charset: UTF-8 # 必须设置 UTF-8，避免 WebFlux 流式返回（AI 场景）会乱码问题
       force: true
+  tomcat:
+    # 纪检录入模块：saveCorrection 提交 15000+ 行 correctedJson（约 9MB），
+    # 仅禁用 x-www-form-urlencoded 体积限制（对 @RequestBody JSON 无影响，但防止误触）
+    max-http-form-post-size: -1
 
 --- #################### 接口文档配置 ####################
 

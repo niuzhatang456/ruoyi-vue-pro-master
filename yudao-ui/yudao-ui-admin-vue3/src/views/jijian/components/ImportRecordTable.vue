@@ -16,9 +16,25 @@
       </template>
     </el-table-column>
     <el-table-column prop="createdAt" label="导入时间" width="165" />
-    <el-table-column v-if="showActions" label="操作" width="120" fixed="right">
+    <el-table-column v-if="showActions" label="操作" width="200" fixed="right">
       <template #default="{ row }">
         <el-button type="primary" link @click="emit('view-parsed', row)">查看解析</el-button>
+        <el-tooltip
+          v-if="row.status === 'failed'"
+          content="解析失败，未写入业务数据，无需删除"
+          placement="top"
+        >
+          <span>
+            <el-button type="danger" link disabled>删除导入数据</el-button>
+          </span>
+        </el-tooltip>
+        <el-button
+          v-else
+          type="danger"
+          link
+          :disabled="row.status !== 'confirmed'"
+          @click="emit('delete-business-data', row)"
+        >删除导入数据</el-button>
       </template>
     </el-table-column>
   </el-table>
@@ -34,6 +50,7 @@ withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (event: 'view-parsed', record: ImportRecord): void
+  (event: 'delete-business-data', record: ImportRecord): void
 }>()
 
 const sourceText: Record<ImportSourceType, string> = {

@@ -9,6 +9,7 @@
       :records="records"
       show-actions
       @view-parsed="openParsedDialog"
+      @delete-business-data="handleDeleteBusinessData"
     />
 
     <el-dialog v-model="parsedDialogVisible" title="解析结果" width="760px">
@@ -18,8 +19,8 @@
 </template>
 
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
-import { getImportRecordList, getParsedData } from '@/api/jijian/import'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getImportRecordList, getParsedData, deleteBusinessData, getParsedDataList } from '@/api/jijian/import'
 import PageShell from '../components/PageShell.vue'
 import ImportRecordTable from '../components/ImportRecordTable.vue'
 import ParsedDataPanel from '../components/ParsedDataPanel.vue'
@@ -51,6 +52,50 @@ const openParsedDialog = async (record: ImportRecord) => {
   try {
     parsedData.value = await getParsedData(record.id)
     parsedDialogVisible.value = true
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  }
+}
+
+const handleDeleteBusinessData = async (record: ImportRecord) => {
+  // 先取得该导入记录对应的 parsedDataId
+  let parsedDataId: number | null = null
+  try {
+    const list = await getParsedDataList(record.id)
+    const confirmed = list.find((p) => p.confirmStatus === 'confirmed')
+    if (confirmed) {
+      parsedDataId = confirmed.id
+    } else if (list.length > 0) {
+      parsedDataId = list[0].id
+    }
+  } catch (_) {
+    /* ignore */
+  }
+
+  if (!parsedDataId) {
+    ElMessage.warning('该导入记录尚未确认写入业务表，无需删除')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认删除导入批次「${record.fileName}」写入的业务数据？\n` +
+      `（仅删除通过该批次导入的记录，不影响手工录入数据）`,
+      '二次确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger'
+      }
+    )
+  } catch {
+    return // 用户取消
+  }
+
+  try {
+    const result = await deleteBusinessData(parsedDataId)
+    ElMessage.success(result.message || `已删除 ${result.deletedRows} 条数据`)
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   }

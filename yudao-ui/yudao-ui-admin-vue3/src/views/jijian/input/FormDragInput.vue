@@ -1,5 +1,7 @@
 <template>
-  <PageShell :title="formTitle" :description="`上传 ${formTitle} 文件，解析后确认写入正式表。`">
+  <PageShell :title="formTitle" :description="`上传 ${formTitle} 文件，解析后预览并确认写入正式表。`">
+
+    <!-- ── 上传区域 ── -->
     <el-upload
       class="upload-area"
       drag
@@ -19,8 +21,15 @@
       </template>
     </el-upload>
 
+    <!-- ── 文件列表 ── -->
     <div v-if="fileResults.length > 0" class="mt-16px">
-      <el-table :data="fileResults" border size="small">
+      <el-table
+        :data="fileResults"
+        border
+        size="small"
+        highlight-current-row
+        @current-change="handleRowSelect"
+      >
         <el-table-column type="index" label="#" width="50" />
         <el-table-column prop="fileName" label="文件名" min-width="180" show-overflow-tooltip />
         <el-table-column label="解析状态" width="110">
@@ -37,36 +46,36 @@
         <el-table-column label="行数" width="70">
           <template #default="{ row }">{{ row.totalRows ?? '-' }}</template>
         </el-table-column>
-        <el-table-column label="业务表" min-width="160">
+        <el-table-column label="写入状态" min-width="160">
           <template #default="{ row }">
             <el-tag v-if="row.businessTable" type="success" size="small">{{ row.businessTable }}</el-tag>
             <span v-else-if="row.errorMsg" class="error-text">{{ row.errorMsg }}</span>
+            <span v-else-if="row.status === 'success'" class="hint-text">点击此行查看预览</span>
             <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="130">
-          <template #default="{ row }">
-            <el-button
-              v-if="row.parsedId && row.status === 'success'"
-              type="primary"
-              size="small"
-              link
-              :loading="row.confirming"
-              @click="confirmSingle(row)"
-            >确认写入</el-button>
-            <el-text v-else-if="row.status === 'confirmed'" type="success" size="small">
-              已写入 {{ row.businessIds ? JSON.parse(row.businessIds).join(',') : '' }}
-            </el-text>
           </template>
         </el-table-column>
       </el-table>
     </div>
 
-    <div v-if="canConfirmAll" class="mt-12px">
-      <el-button type="primary" :loading="confirmingAll" @click="confirmAll">
-        全部确认写入（{{ pendingCount }} 个）
-      </el-button>
+    <!-- ── 预览/编辑/确认区域 ── -->
+    <div v-if="selectedParsedData" class="mt-16px">
+      <el-divider content-position="left">
+        <el-text type="primary">{{ selectedParsedData.fileName || '解析结果预览' }}</el-text>
+      </el-divider>
+      <ParsedDataPanel
+        :parsed-data="selectedParsedData"
+        @confirmed="handleConfirmed"
+      />
     </div>
+
+    <!-- ── 无数据提示 ── -->
+    <el-empty
+      v-else-if="fileResults.length === 0"
+      description="暂无识别结果，请拖拽文件上传"
+      :image-size="80"
+      class="mt-24px"
+    />
+
   </PageShell>
 </template>
 
@@ -74,9 +83,11 @@
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import type { UploadFile, UploadFiles } from 'element-plus'
-import { confirmWrite, getParsedData } from '@/api/jijian/import'
-import type { ImportRecordVO } from '@/api/jijian/import'
+import { getParsedData } from '@/api/jijian/import'
+import type { ImportRecordVO, ParsedDataVO } from '@/api/jijian/import'
 import PageShell from '../components/PageShell.vue'
+import ParsedDataPanel from '../components/ParsedDataPanel.vue'
+import type { ParsedData } from '../types'
 
 interface Props {
   formTitle: string
@@ -94,20 +105,19 @@ interface FileResult {
   parsedId?: number
   businessTable?: string
   businessIds?: string
-  confirming: boolean
+  parsedData?: ParsedData
 }
 
 const uploading = ref(false)
-const confirmingAll = ref(false)
 const fileResults = ref<FileResult[]>([])
+const selectedParsedData = ref<ParsedData | null>(null)
 let uploadTimer: ReturnType<typeof setTimeout> | undefined
 
-const canConfirmAll = computed(() =>
-  fileResults.value.some((r) => r.status === 'success' && !r.loading && !r.confirming)
-)
-const pendingCount = computed(() =>
-  fileResults.value.filter((r) => r.status === 'success' && !r.loading).length
-)
+function handleRowSelect(row: FileResult | null) {
+  if (row?.parsedData) {
+    selectedParsedData.value = row.parsedData
+  }
+}
 
 const handleFileChange = (_file: UploadFile, fileList: UploadFiles) => {
   if (uploadTimer) clearTimeout(uploadTimer)
@@ -115,7 +125,7 @@ const handleFileChange = (_file: UploadFile, fileList: UploadFiles) => {
     const files = fileList
       .map((f) => f.raw)
       .filter((f): f is File => Boolean(f))
-      .filter((f) => !fileResults.value.some((r) => r.fileName === f.name))
+      .filter((f) => !fileResults.value.some((r) => r.fileName === f.name && !r.loading))
     if (files.length === 0) return
     uploadFiles(files)
   }, 200)
@@ -124,7 +134,7 @@ const handleFileChange = (_file: UploadFile, fileList: UploadFiles) => {
 async function uploadFiles(files: File[]) {
   uploading.value = true
   const newRows: FileResult[] = files.map((f) => ({
-    fileName: f.name, loading: true, status: '', errorMsg: '', confirming: false
+    fileName: f.name, loading: true, status: '', errorMsg: ''
   }))
   fileResults.value = [...fileResults.value, ...newRows]
   const CONCURRENCY = 3
@@ -135,11 +145,11 @@ async function uploadFiles(files: File[]) {
 }
 
 async function uploadSingle(file: File) {
-  const row = fileResults.value.find((r) => r.fileName === file.name)
+  const row = fileResults.value.find((r) => r.fileName === file.name && r.loading)
   if (!row) return
   try {
     const record = await props.uploadFn(file)
-    const pd = await getParsedData(record.id)
+    const pd: ParsedDataVO = await getParsedData(record.id)
     row.status = pd.status
     row.errorMsg = pd.errorMsg || ''
     row.parsedId = pd.id as number
@@ -151,6 +161,12 @@ async function uploadSingle(file: File) {
       row.businessTable = pd.businessTable
       row.businessIds = pd.businessIds
     }
+    // 存储完整 parsed data 供预览
+    row.parsedData = pd as unknown as ParsedData
+    // 自动选中最新上传的文件
+    if (pd.status === 'success') {
+      selectedParsedData.value = pd as unknown as ParsedData
+    }
   } catch (err: unknown) {
     row.status = 'failed'
     row.errorMsg = err instanceof Error ? err.message : '上传失败'
@@ -159,28 +175,19 @@ async function uploadSingle(file: File) {
   }
 }
 
-async function confirmSingle(row: FileResult) {
-  if (!row.parsedId) return
-  row.confirming = true
-  try {
-    const result = await confirmWrite(row.parsedId)
+function handleConfirmed(result: { formType: string; businessTable?: string; confirmedIds: number[]; confirmedCount: number }) {
+  // 同步文件列表中对应行的状态
+  const row = fileResults.value.find((r) => r.parsedData === selectedParsedData.value)
+  if (row) {
     row.status = 'confirmed'
-    row.businessTable = result.businessTable || props.formTitle
+    row.businessTable = result.businessTable || result.formType
     row.businessIds = JSON.stringify(result.confirmedIds)
-    ElMessage.success(`${props.formTitle} 写入 ${result.confirmedCount} 条`)
-  } catch (err: unknown) {
-    ElMessage.error(err instanceof Error ? err.message : '确认写入失败')
-  } finally {
-    row.confirming = false
+    if (row.parsedData) {
+      row.parsedData = { ...row.parsedData, confirmStatus: 'confirmed', businessTable: result.businessTable, businessIds: row.businessIds }
+      selectedParsedData.value = row.parsedData
+    }
   }
-}
-
-async function confirmAll() {
-  confirmingAll.value = true
-  const pending = fileResults.value.filter((r) => r.status === 'success' && !r.loading)
-  await Promise.all(pending.map((r) => confirmSingle(r)))
-  confirmingAll.value = false
-  ElMessage.success(`全部确认写入完成（${pending.length} 个）`)
+  ElMessage.success(`写入成功：${result.confirmedCount} 条记录 → ${result.businessTable || result.formType}`)
 }
 </script>
 
@@ -188,6 +195,7 @@ async function confirmAll() {
 .upload-area { width: 100%; }
 .upload-icon { font-size: 48px; color: var(--el-color-primary); }
 .mt-16px { margin-top: 16px; }
-.mt-12px { margin-top: 12px; }
+.mt-24px { margin-top: 24px; }
 .error-text { color: var(--el-color-danger); font-size: 12px; }
+.hint-text { color: var(--el-color-info); font-size: 12px; }
 </style>

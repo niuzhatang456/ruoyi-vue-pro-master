@@ -14,9 +14,11 @@ import cn.iocoder.yudao.module.jijian.service.confirm.ConfirmWriteHandlerRegistr
 import cn.iocoder.yudao.module.jijian.service.confirm.ConfirmWriteResult;
 import cn.iocoder.yudao.module.jijian.service.ocr.OcrResult;
 import cn.iocoder.yudao.module.jijian.service.ocr.OcrService;
+import cn.iocoder.yudao.module.jijian.util.JijianExcelMergedCellUtils;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.FormulaEvaluator;
@@ -24,6 +26,8 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import cn.iocoder.yudao.framework.common.exception.ServiceException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
@@ -38,16 +42,21 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.yudao.module.jijian.enums.ErrorCodeConstants.*;
 
+@Slf4j
 @Service
 @Validated
 public class ParsedDataServiceImpl implements ParsedDataService {
@@ -61,6 +70,9 @@ public class ParsedDataServiceImpl implements ParsedDataService {
     /** rawText 中首行示例展示字段数 */
     private static final int DETECT_SAMPLE_COLS = 3;
     private static final int OCR_HEADER_SCAN_LIMIT = 10;
+    private static final long MAX_UPLOAD_BYTES = 20L * 1024 * 1024;
+    private static final Set<String> ALLOWED_UPLOAD_EXTENSIONS = new HashSet<>(
+            Arrays.asList("xls", "xlsx", "csv", "jpg", "jpeg", "png", "pdf"));
     private static final List<List<String>> OCR_HEADER_ALIASES = Arrays.asList(
             Arrays.asList("部门", "所在部门", "科室"),
             Arrays.asList("申请人", "姓名", "人员", "员工"),
@@ -76,17 +88,32 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             Arrays.asList("房产名称"), Arrays.asList("产权信息", "产权"),
             Arrays.asList("面积"), Arrays.asList("租赁情况"));
 
+    /** 允许按 source_parsed_data_id 删除数据的业务表白名单（只删导入批次数据，不碰其他表） */
+    private static final Set<String> DELETABLE_BUSINESS_TABLES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            "jijian_leave_health",
+            "jijian_leave_personal",
+            "jijian_attendance_daily",
+            "jijian_business_trip",
+            "jijian_compensatory_leave",
+            "jijian_property",
+            "jijian_lessee",
+            "jijian_lease_contract",
+            "jijian_canteen_supplier"
+    )));
+
     @Resource private ParsedDataMapper            parsedDataMapper;
     @Resource private ImportRecordMapper          importRecordMapper;
     @Resource private ConfirmWriteHandlerRegistry handlerRegistry;
     @Resource private JijianProperties            jijianProperties;
     @Resource private OcrService                  ocrService;
+    @Resource private JdbcTemplate                jdbcTemplate;
 
     // ==================== 上传解析入口 ====================
 
     @Override
     public ParsedDataDO parseAndCreate(ImportRecordDO importRecord, MultipartFile file) {
         try {
+            validateUploadFile(file);
             String fname = StrUtil.blankToDefault(file.getOriginalFilename(), "").toLowerCase(Locale.ROOT);
             ParsedPayload payload;
 
@@ -101,6 +128,12 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             }
 
             String formType = detectFormType(payload.detectText);
+            if (FormTypeConstants.ATTENDANCE.equals(formType)) {
+                normalizeAttendanceHeaders(payload.parsedData);
+            }
+            if (FormTypeConstants.CANTEEN.equals(formType)) {
+                enrichCanteenParsedData(payload.parsedData);
+            }
             if (StrUtil.isBlank(formType)) {
                 String hint = extractHeadersHint(payload);
                 return createFailedParsedData(importRecord,
@@ -130,6 +163,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
     @Override
     public ParsedDataDO parseAndCreateWithFormType(ImportRecordDO importRecord, MultipartFile file, String forcedFormType) {
         try {
+            validateUploadFile(file);
             String fname = StrUtil.blankToDefault(file.getOriginalFilename(), "").toLowerCase(Locale.ROOT);
             ParsedPayload payload;
             if (isExcel(fname)) {
@@ -142,6 +176,12 @@ public class ParsedDataServiceImpl implements ParsedDataService {
                 payload = parseTextFile(file);
             }
 
+            if (FormTypeConstants.ATTENDANCE.equals(forcedFormType)) {
+                normalizeAttendanceHeaders(payload.parsedData);
+            }
+            if (FormTypeConstants.CANTEEN.equals(forcedFormType)) {
+                enrichCanteenParsedData(payload.parsedData);
+            }
             ParsedDataDO parsedData = ParsedDataDO.builder()
                     .importRecordId(importRecord.getId())
                     .formType(forcedFormType)
@@ -159,6 +199,64 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             return createFailedParsedData(importRecord,
                     StrUtil.blankToDefault(ex.getMessage(), "文件解析失败，请检查文件格式"));
         }
+    }
+
+    private void validateUploadFile(MultipartFile file) throws Exception {
+        if (file == null || file.isEmpty() || file.getSize() <= 0 || file.getSize() > MAX_UPLOAD_BYTES) {
+            throw exception(PARSED_DATA_FILE_INVALID);
+        }
+        String originalName = StrUtil.blankToDefault(file.getOriginalFilename(), "");
+        if (originalName.contains("..") || originalName.contains("/") || originalName.contains("\\")
+                || originalName.indexOf('\0') >= 0) {
+            throw exception(PARSED_DATA_FILE_INVALID);
+        }
+        String extension = originalName.contains(".")
+                ? originalName.substring(originalName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT) : "";
+        if (!ALLOWED_UPLOAD_EXTENSIONS.contains(extension)) {
+            throw exception(PARSED_DATA_FILE_FORMAT_UNSUPPORTED);
+        }
+        byte[] header = new byte[8];
+        int read;
+        try (InputStream inputStream = file.getInputStream()) {
+            read = inputStream.read(header);
+        }
+        if (!matchesFileSignature(extension, header, read)) {
+            throw exception(PARSED_DATA_FILE_INVALID);
+        }
+    }
+
+    private boolean matchesFileSignature(String extension, byte[] header, int read) {
+        if (read <= 0) {
+            return false;
+        }
+        if ("xlsx".equals(extension)) {
+            return read >= 4 && header[0] == 0x50 && header[1] == 0x4b
+                    && header[2] == 0x03 && header[3] == 0x04;
+        }
+        if ("xls".equals(extension)) {
+            return read >= 8 && (header[0] & 0xff) == 0xd0 && (header[1] & 0xff) == 0xcf
+                    && (header[2] & 0xff) == 0x11 && (header[3] & 0xff) == 0xe0;
+        }
+        if ("pdf".equals(extension)) {
+            return read >= 4 && header[0] == '%' && header[1] == 'P' && header[2] == 'D' && header[3] == 'F';
+        }
+        if ("png".equals(extension)) {
+            return read >= 8 && (header[0] & 0xff) == 0x89 && header[1] == 'P'
+                    && header[2] == 'N' && header[3] == 'G';
+        }
+        if ("jpg".equals(extension) || "jpeg".equals(extension)) {
+            return read >= 3 && (header[0] & 0xff) == 0xff && (header[1] & 0xff) == 0xd8
+                    && (header[2] & 0xff) == 0xff;
+        }
+        if ("csv".equals(extension)) {
+            for (int i = 0; i < read; i++) {
+                if (header[i] == 0) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -234,7 +332,20 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         }
 
         // CAS 成功后才执行正式表写入（在同一事务内；若写入失败，事务回滚会撤销 CAS）
-        ConfirmWriteResult result = handler.doConfirm(parsedData);
+        ConfirmWriteResult result;
+        try {
+            result = handler.doConfirm(parsedData);
+        } catch (ServiceException se) {
+            // ServiceException 直接上抛，前端可见具体消息
+            log.error("[confirmWrite] parsedDataId={} formType={} 业务写入失败: {}", parsedDataId, formType, se.getMessage());
+            throw se;
+        } catch (Exception e) {
+            // 非业务异常（DB 错误、NPE 等）转换为可读消息后上抛
+            String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            log.error("[confirmWrite] parsedDataId={} formType={} 写入异常", parsedDataId, formType, e);
+            throw new ServiceException(CONFIRM_WRITE_DB_ERROR.getCode(),
+                    "写入失败（" + formType + "）：" + detail);
+        }
 
         // 回写追溯字段（confirm_status 已在 CAS 中更新，此处补其余字段）
         Long userId = null;
@@ -246,7 +357,11 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         update.setConfirmUserId(userId);
         update.setBusinessTable(result.getBusinessTable() != null
                 ? result.getBusinessTable() : handler.getBusinessTableName());
-        update.setBusinessIds(JSONUtil.toJsonStr(result.getConfirmedIds()));
+        // 超过 200 条时只存前 200 个 ID（business_ids 是追溯字段，不需要全量）
+        List<Long> idsToStore = result.getConfirmedIds().size() > 200
+                ? result.getConfirmedIds().subList(0, 200)
+                : result.getConfirmedIds();
+        update.setBusinessIds(JSONUtil.toJsonStr(idsToStore));
         if (FormTypeConstants.PROPERTY.equals(formType) && !result.getConfirmedIds().isEmpty()) {
             update.setConfirmedPropertyId(result.getConfirmedIds().get(0));
         }
@@ -257,21 +372,21 @@ public class ParsedDataServiceImpl implements ParsedDataService {
     private ConfirmWriteResult buildIdempotentResult(ParsedDataDO parsedData, Long parsedDataId) {
         String existingBusinessTable = parsedData.getBusinessTable();
         List<Long> existingIds = new ArrayList<>();
-        if (StrUtil.isNotBlank(parsedData.getBusinessIds())) {
+
+        // 始终从 DB 查询实际 confirmedCount，不依赖 business_ids（business_ids 截断为 200 条会导致 count 偏小）
+        ConfirmWriteHandler handler = handlerRegistry.getHandler(parsedData.getFormType());
+        if (handler != null) {
+            existingIds = handler.queryConfirmedSummary(parsedDataId).stream()
+                    .map(m -> parseLong(m.get("记录ID")))
+                    .filter(id -> id != null)
+                    .collect(Collectors.toList());
+            if (StrUtil.isBlank(existingBusinessTable)) existingBusinessTable = handler.getBusinessTableName();
+        } else if (StrUtil.isNotBlank(parsedData.getBusinessIds())) {
+            // handler 不存在时降级使用存储的 IDs（最多 200 条，仅兜底）
             try {
                 cn.hutool.json.JSONArray arr = cn.hutool.json.JSONUtil.parseArray(parsedData.getBusinessIds());
                 for (int i = 0; i < arr.size(); i++) existingIds.add(arr.getLong(i));
             } catch (Exception ignore) {}
-        }
-        if (existingIds.isEmpty()) {
-            ConfirmWriteHandler handler = handlerRegistry.getHandler(parsedData.getFormType());
-            if (handler != null) {
-                existingIds = handler.queryConfirmedSummary(parsedDataId).stream()
-                        .map(m -> parseLong(m.get("记录ID")))
-                        .filter(id -> id != null)
-                        .collect(Collectors.toList());
-                if (StrUtil.isBlank(existingBusinessTable)) existingBusinessTable = handler.getBusinessTableName();
-            }
         }
         return ConfirmWriteResult.idempotent(parsedData.getFormType(), existingBusinessTable, existingIds);
     }
@@ -282,6 +397,70 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         return result.getConfirmedIds().isEmpty() ? null : result.getConfirmedIds().get(0);
     }
 
+    // ==================== 删除导入批次业务数据 ====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public DeleteBusinessDataResult deleteBusinessData(Long importRecordId) {
+        // 通过 importRecordId 找到最近一次已确认的 parsedData
+        ParsedDataDO parsedData = parsedDataMapper.selectLatestByImportRecordId(importRecordId);
+        if (parsedData == null) {
+            throw new ServiceException(PARSED_DATA_NOT_EXISTS.getCode(), "未找到该导入记录对应的解析数据");
+        }
+        return deleteBusinessDataByParsedDataId(parsedData.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public DeleteBusinessDataResult deleteBusinessDataByParsedDataId(Long parsedDataId) {
+        ParsedDataDO parsedData = parsedDataMapper.selectById(parsedDataId);
+        if (parsedData == null) {
+            throw new ServiceException(PARSED_DATA_NOT_EXISTS.getCode(), "解析数据不存在：" + parsedDataId);
+        }
+
+        String businessTable = parsedData.getBusinessTable();
+        if (StrUtil.isBlank(businessTable)) {
+            // 尚未确认写入，或业务表字段未回写：从 formType 推断
+            businessTable = resolveBusinessTableFromFormType(parsedData.getFormType());
+        }
+        if (StrUtil.isBlank(businessTable)) {
+            return new DeleteBusinessDataResult(0, null, parsedDataId,
+                    "该解析记录尚未确认写入业务表，无需删除");
+        }
+
+        // 白名单校验，防止误操作非业务表
+        if (!DELETABLE_BUSINESS_TABLES.contains(businessTable)) {
+            throw new ServiceException(-1, "不允许删除的表：" + businessTable);
+        }
+
+        // COUNT 再 DELETE，严格限定 source_parsed_data_id
+        String countSql = "SELECT COUNT(*) FROM `" + businessTable + "` WHERE source_parsed_data_id = ? AND deleted = 0";
+        Integer count = jdbcTemplate.queryForObject(countSql, Integer.class, parsedDataId);
+        int toDelete = count != null ? count : 0;
+
+        if (toDelete == 0) {
+            return new DeleteBusinessDataResult(0, businessTable, parsedDataId,
+                    "业务表中已无该批次数据（source_parsed_data_id=" + parsedDataId + "），可能已删除或从未写入");
+        }
+
+        String deleteSql = "UPDATE `" + businessTable + "` SET deleted = 1, updater = 'batch-delete', update_time = NOW()" +
+                           " WHERE source_parsed_data_id = ? AND deleted = 0";
+        int deleted = jdbcTemplate.update(deleteSql, parsedDataId);
+
+        log.info("[deleteBusinessData] parsedDataId={} businessTable={} 逻辑删除 {} 条",
+                parsedDataId, businessTable, deleted);
+
+        return new DeleteBusinessDataResult(deleted, businessTable, parsedDataId,
+                "已删除 " + deleted + " 条数据（表：" + businessTable + "，批次ID：" + parsedDataId + "）");
+    }
+
+    /** 根据 formType 推断对应的业务表名 */
+    private String resolveBusinessTableFromFormType(String formType) {
+        if (StrUtil.isBlank(formType)) return null;
+        ConfirmWriteHandler handler = handlerRegistry.getHandler(formType);
+        return handler != null ? handler.getBusinessTableName() : null;
+    }
+
     // ==================== Excel 解析 ====================
 
     private ParsedPayload parseExcel(MultipartFile file) throws Exception {
@@ -289,18 +468,32 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         try (InputStream in = file.getInputStream();
              Workbook workbook = WorkbookFactory.create(in)) {
 
-            Sheet sheet = workbook.getNumberOfSheets() > 0 ? workbook.getSheetAt(0) : null;
+            int sheetCount = workbook.getNumberOfSheets();
+            Sheet sheet = sheetCount > 0 ? workbook.getSheetAt(0) : null;
             if (sheet == null) throw new IllegalArgumentException("Excel 文件没有可读取的 Sheet");
+
+            if (sheetCount > 1) {
+                log.info("[parseExcel] 文件 {} 共 {} 个 Sheet，仅导入第 1 个：「{}」",
+                        fileName, sheetCount, sheet.getSheetName());
+            }
 
             DataFormatter formatter = new DataFormatter(Locale.CHINA);
             FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
-            TableStructureResolver.Result resolved = TableStructureResolver.resolve(
-                    readSheetRows(sheet, formatter, evaluator));
+            // 先展开合并单元格，再解析表结构（适用于所有 9 种业务表单）
+            List<List<String>> rawRows = JijianExcelMergedCellUtils.readSheetRowsWithMerge(sheet, formatter, evaluator);
+            // 保留全量单元格文本（每行用\n分隔），供食堂解析提取日期/供应商
+            String fullScanText = rawRows.stream()
+                    .map(row -> row.stream().filter(StrUtil::isNotBlank).collect(Collectors.joining(" ")))
+                    .filter(StrUtil::isNotBlank)
+                    .collect(Collectors.joining("\n"));
+            TableStructureResolver.Result resolved = TableStructureResolver.resolve(rawRows);
             List<String> headers = resolved.getHeaders();
             List<Map<String, String>> rows = resolved.getRows();
 
             int totalRows = rows.size();
             Map<String, Object> parsed = buildParsedMap(fileName, sheet.getSheetName(), headers, rows, totalRows);
+            parsed.put("sheetCount", sheetCount);   // 供前端判断是否有多个 sheet
+            parsed.put("_fullScanText", fullScanText);
             String rawText   = buildRawText(fileName, sheet.getSheetName(), headers, rows, totalRows);
             String detectText = fileName + " " + sheet.getSheetName() + " "
                     + headers.stream().filter(StrUtil::isNotBlank).collect(Collectors.joining(" "));
@@ -470,6 +663,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             parsed.put("ocrNotice", ocrResult.getNotice());
         }
         parsed.put("ocrText", StrUtil.maxLength(ocrResult.getFullText(), 1000));
+        parsed.put("_fullScanText", ocrResult.getFullText());  // 完整 OCR 文本，供食堂日期/供应商提取
 
         String rawText    = buildRawText(fileName, "OCR", headers, rows, totalRows);
         String detectText = fileName + " " + String.join(" ", headers) + " " + ocrResult.getFullText();
@@ -554,6 +748,164 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         return new ParsedPayload(rawText, detectText, parsed);
     }
 
+    // ==================== 食堂供应专用：日期/供应商注入 ====================
+
+    // 带前缀的日期：日期：2025年4月3号
+    private static final Pattern CANTEEN_DATE_PATTERN = Pattern.compile(
+            "(?:日期|时间)[：:﹕]\\s*(\\d{4})[年\\-/](\\d{1,2})[月\\-/](\\d{1,2})[号日]?");
+    // 仅年月日（无前缀，兜底：OCR 可能丢失"日期："前缀）
+    private static final Pattern CANTEEN_DATE_FALLBACK = Pattern.compile(
+            "(?<![\\d\\u4e00-\\u9fa5])(\\d{4})[年](\\d{1,2})[月](\\d{1,2})[号日]?(?![\\d])");
+    private static final Pattern CANTEEN_SUPPLIER_PATTERN = Pattern.compile(
+            "供[应货]商[：:﹕]\\s*([^\\n\\r、,，;；]{1,60}?)(?=[\\s]*(?:客户|签字|签名|电话|联系|$)|[\\n\\r])");
+    private static final Pattern CANTEEN_SUPPLIER_UNIT_PATTERN = Pattern.compile(
+            "(?:配送单位|供应单位)[：:﹕]\\s*([^\\n\\r、,，;；]{1,60}?)(?=[\\s]*(?:客户|签字|签名|$)|[\\n\\r])");
+    /** 供应商标签（冒号可缺失；同一行可能因合并单元格展开而重复多次） */
+    private static final Pattern SUPPLIER_LABEL = Pattern.compile(
+            "(?:供应商|供货商|供货单位|配送单位|供应单位)[：:﹕]?");
+    /** 供应商行尾部噪音：噪音标签及其之后的内容全部丢弃 */
+    private static final Pattern SUPPLIER_NOISE = Pattern.compile(
+            "(?:客户签字|客户|签字|签名|盖章|日期|电话|联系人|联系方式)[：:﹕]?.*$");
+
+    /** 从扫描文本中提取配送日期，格式化为 yyyy-MM-dd */
+    private String extractDeliveryDate(String text) {
+        if (StrUtil.isBlank(text)) return null;
+        // 优先匹配有"日期："前缀的格式
+        Matcher m = CANTEEN_DATE_PATTERN.matcher(text);
+        if (m.find()) {
+            return formatDate(m.group(1), m.group(2), m.group(3));
+        }
+        // 兜底：无前缀的年月日（OCR 可能丢失"日期："）
+        Matcher m2 = CANTEEN_DATE_FALLBACK.matcher(text);
+        if (m2.find()) {
+            return formatDate(m2.group(1), m2.group(2), m2.group(3));
+        }
+        return null;
+    }
+
+    private String formatDate(String year, String month, String day) {
+        return String.format("%d-%02d-%02d",
+                Integer.parseInt(year), Integer.parseInt(month), Integer.parseInt(day));
+    }
+
+    private static final Pattern SUPPLIER_TRAILING = Pattern.compile(
+            "\\s+(客户|签字|签名|电话|联系方式|地址|盖章).*$");
+
+    /**
+     * 从扫描文本中提取供应商名称。
+     *
+     * <p>优先按行提取：找到含"供应商/供货商/供货单位/配送单位/供应单位"标签的行，
+     * 剥离所有标签和尾部噪音（客户签字等），再对剩余 token 去重拼接。
+     * 之所以要去重：Excel 落款行常用合并单元格（如 A:B="供应商："、C:H=公司名），
+     * 合并展开后同一行文本变成"供应商： 供应商： 公司名 ×6"，旧正则因 60 字上限直接失配。
+     */
+    String extractSupplierName(String text) {
+        if (StrUtil.isBlank(text)) return null;
+        // 1) 按行提取（Excel 全文为 \n 分行；OCR 全文可能是无换行整段，超长行跳过交给兜底正则）
+        for (String line : text.split("\\r?\\n")) {
+            if (line.length() > 200 || !SUPPLIER_LABEL.matcher(line).find()) continue;
+            String candidate = SUPPLIER_LABEL.matcher(line).replaceAll(" ");
+            candidate = SUPPLIER_NOISE.matcher(candidate).replaceFirst(" ");
+            candidate = dedupJoinTokens(candidate);
+            if (isReasonableSupplierName(candidate)) return candidate;
+        }
+        // 2) 兜底：旧正则（处理标签与名称同段且无换行的 OCR 整段文本）
+        Matcher m = CANTEEN_SUPPLIER_PATTERN.matcher(text);
+        if (m.find()) {
+            String candidate = cleanSupplier(m.group(1));
+            if (isReasonableSupplierName(candidate)) return candidate;
+        }
+        Matcher m2 = CANTEEN_SUPPLIER_UNIT_PATTERN.matcher(text);
+        if (m2.find()) {
+            String candidate = cleanSupplier(m2.group(1));
+            if (isReasonableSupplierName(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    /** 供应商候选合理性校验：长度 2~60，且不含标题/汇总/签字类词（防止把整段文本误当名称） */
+    private boolean isReasonableSupplierName(String candidate) {
+        if (StrUtil.isBlank(candidate)) return false;
+        if (candidate.length() < 2 || candidate.length() > 60) return false;
+        return !containsAny(candidate, "配送单", "签字", "签名", "小计", "总计", "客户");
+    }
+
+    /**
+     * 按空白拆分 token，去除相邻重复后拼接（不留空格，适配中文名称）。
+     * 既消除合并单元格展开的重复，也能把 OCR 拆成多段的名称重新拼起来。
+     */
+    private String dedupJoinTokens(String s) {
+        if (StrUtil.isBlank(s)) return "";
+        StringBuilder sb = new StringBuilder();
+        String prev = null;
+        for (String token : s.trim().split("\\s+")) {
+            if (token.isEmpty() || token.equals(prev)) continue;
+            sb.append(token);
+            prev = token;
+        }
+        return sb.toString().trim();
+    }
+
+    private String cleanSupplier(String raw) {
+        if (raw == null) return null;
+        // 去除尾部已知标签（客户签字/签名等）
+        raw = SUPPLIER_TRAILING.matcher(raw.trim()).replaceFirst("").trim();
+        return raw.isEmpty() ? null : raw;
+    }
+
+    /**
+     * 食堂供应后处理：从 _fullScanText 提取日期/供应商，注入每个产品行。
+     * 注入后删除临时键，不影响正式 parsedJson 结构。
+     */
+    @SuppressWarnings("unchecked")
+    private void enrichCanteenParsedData(Map<String, Object> parsedData) {
+        String scanText = (String) parsedData.remove("_fullScanText");
+        if (StrUtil.isBlank(scanText)) {
+            // OCR 路径：ocrText 作为备份（已截断，但通常足够）
+            scanText = (String) parsedData.getOrDefault("ocrText", "");
+        }
+        if (StrUtil.isBlank(scanText)) return;
+
+        String deliveryDate  = extractDeliveryDate(scanText);
+        String supplierName  = extractSupplierName(scanText);
+        Object headersObj = parsedData.get("headers");
+        Object rowsObj    = parsedData.get("rows");
+        if (!(headersObj instanceof List) || !(rowsObj instanceof List)) return;
+
+        List<String>           headers = (List<String>) headersObj;
+        List<Map<String, String>> rows = (List<Map<String, String>>) rowsObj;
+
+        // 始终注入"时间"和"供应商"列，值为空时显示空格，用户可在预览中手工补齐
+        if (!headers.contains("时间"))   headers.add("时间");
+        if (!headers.contains("供应商")) headers.add("供应商");
+
+        String dateVal     = StrUtil.blankToDefault(deliveryDate, "");
+        String supplierVal = StrUtil.blankToDefault(supplierName, "");
+        for (Map<String, String> row : rows) {
+            row.put("时间",   dateVal);
+            row.put("供应商", supplierVal);
+        }
+        parsedData.put("totalRows", rows.size());
+
+        // 保留全文扫描文本（截断），供排查与后续元数据再提取（落款行不入 rows 但不丢全文）
+        parsedData.put("scanText", StrUtil.maxLength(scanText, 4000));
+
+        // 未能识别日期/供应商时，写入非阻断提示（追加到已有 ocrNotice 之后），供前端展示
+        StringBuilder notice = new StringBuilder(
+                StrUtil.blankToDefault((String) parsedData.get("ocrNotice"), ""));
+        if (StrUtil.isBlank(deliveryDate)) {
+            if (notice.length() > 0) notice.append(" ");
+            notice.append("未识别到配送日期，请在预览中核对「时间」列并手工补齐后再确认写入。");
+        }
+        if (StrUtil.isBlank(supplierName)) {
+            if (notice.length() > 0) notice.append(" ");
+            notice.append("未识别到供应商，请在预览中核对「供应商」列并手工补齐后再确认写入。");
+        }
+        if (notice.length() > 0) {
+            parsedData.put("ocrNotice", notice.toString());
+        }
+    }
+
     // ==================== 文件类型判断 ====================
 
     private boolean isExcel(String fn) {
@@ -566,7 +918,8 @@ public class ParsedDataServiceImpl implements ParsedDataService {
 
     private boolean isImageOrPdf(String fn) {
         return fn.endsWith(".jpg") || fn.endsWith(".jpeg") || fn.endsWith(".png")
-                || fn.endsWith(".gif") || fn.endsWith(".bmp") || fn.endsWith(".pdf");
+                || fn.endsWith(".gif") || fn.endsWith(".bmp") || fn.endsWith(".webp")
+                || fn.endsWith(".pdf");
     }
 
     // ==================== 表单类型识别 ====================
@@ -581,9 +934,9 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         if (containsAny(c, "出差", "出差事由", "出差类型", "出差开始")) return FormTypeConstants.BUSINESS_TRIP;
         if (containsAny(c, "事假", "请假类型", "请假事由", "请假开始", "假期类型")) return FormTypeConstants.LEAVE_PERSONAL;
         if (containsAny(c, "考勤", "打卡", "上班打卡", "下班打卡", "考勤日期")) return FormTypeConstants.ATTENDANCE;
-        // 食堂：采价点/采购点也作为识别依据
-        if (containsAny(c, "食堂", "物品名称", "项目名称", "规格等级", "规格、等级",
-                         "采购点", "采价点", "采购地点", "单价", "价格")) return FormTypeConstants.CANTEEN;
+        // 食堂：采价点/采购点/商品名称/配送单/供应商也作为识别依据
+        if (containsAny(c, "食堂", "食堂配送单", "物品名称", "商品名称", "项目名称", "规格等级", "规格、等级",
+                         "采购点", "采价点", "采购地点", "配送单", "供应商", "供货商", "单价", "价格")) return FormTypeConstants.CANTEEN;
         if (containsAny(c, "房产", "不动产", "产权", "建筑面积", "房产地址", "租赁情况")) return FormTypeConstants.PROPERTY;
         if (containsAny(c, "地址", "面积")) return FormTypeConstants.PROPERTY;
         return null;
@@ -674,6 +1027,59 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * 考勤日报专用：将重复的"打卡时间/打卡结果/打卡地点"按上班/下班语义重命名。
+     * 规则：以"上班备注"列为分界，之前的归入上班打卡，之后的归入下班打卡。
+     * 若无"上班备注"，则以 _2 后缀区分第二组。
+     */
+    @SuppressWarnings("unchecked")
+    private void normalizeAttendanceHeaders(Map<String, Object> parsedData) {
+        Object headersObj = parsedData.get("headers");
+        if (!(headersObj instanceof List)) return;
+        List<String> headers = (List<String>) headersObj;
+
+        int checkinRemarkIdx = -1;
+        for (int i = 0; i < headers.size(); i++) {
+            if ("上班备注".equals(headers.get(i))) {
+                checkinRemarkIdx = i;
+                break;
+            }
+        }
+
+        Map<String, String> renameMap = new LinkedHashMap<>();
+        for (int i = 0; i < headers.size(); i++) {
+            String h = headers.get(i);
+            String baseName = h.endsWith("_2") ? h.substring(0, h.length() - 2) : h;
+            boolean isCheckin;
+            if (checkinRemarkIdx >= 0) {
+                isCheckin = i < checkinRemarkIdx;
+            } else {
+                isCheckin = !h.endsWith("_2");
+            }
+            String renamed = null;
+            if ("打卡时间".equals(baseName)) renamed = isCheckin ? "上班打卡时间" : "下班打卡时间";
+            else if ("打卡结果".equals(baseName)) renamed = isCheckin ? "上班打卡结果" : "下班打卡结果";
+            else if ("打卡地点".equals(baseName)) renamed = isCheckin ? "上班打卡地点" : "下班打卡地点";
+            if (renamed != null) {
+                renameMap.put(h, renamed);
+                headers.set(i, renamed);
+            }
+        }
+
+        if (renameMap.isEmpty()) return;
+        Object rowsObj = parsedData.get("rows");
+        if (!(rowsObj instanceof List)) return;
+        List<Map<String, String>> rows = (List<Map<String, String>>) rowsObj;
+        for (Map<String, String> row : rows) {
+            for (Map.Entry<String, String> entry : renameMap.entrySet()) {
+                if (row.containsKey(entry.getKey())) {
+                    String val = row.remove(entry.getKey());
+                    row.put(entry.getValue(), val);
+                }
+            }
+        }
     }
 
     private String extractHeadersHint(ParsedPayload payload) {

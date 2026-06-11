@@ -39,4 +39,7 @@ public class JijianAiQueryIntent {
 
     /** 用户原始消息，仅用于跨表检查和边界判断，不参与查询 */
     private String originalMessage;
+
+    /** 目标人员姓名，用于个人明细查询，来自 AI 解析或本地关键词提取 */
+    private String personName;
 }

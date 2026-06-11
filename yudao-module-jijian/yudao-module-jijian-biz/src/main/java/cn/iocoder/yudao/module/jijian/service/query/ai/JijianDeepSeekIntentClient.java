@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.jijian.service.query.JijianAttendanceQueryService
 import cn.iocoder.yudao.module.jijian.service.query.dto.JijianAiQueryIntent;
 import cn.iocoder.yudao.module.jijian.service.query.JijianAttendanceAnalysisService;
 import cn.iocoder.yudao.module.jijian.service.query.JijianAttendanceAnalysisService.AnalysisResult;
+import cn.iocoder.yudao.module.jijian.service.query.JijianDirectTableAnalysisService.DirectAnalysisResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -27,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Slf4j
@@ -37,7 +39,7 @@ public class JijianDeepSeekIntentClient implements JijianAiIntentClient {
     private static final String ALL = "ALL";
     private static final Set<String> ALLOWED_KEYS = new HashSet<>(Arrays.asList(
             "formType", "department", "timeRange", "metrics", "needDetail",
-            "analysisGoal", "drillDownTarget", "confidence"
+            "analysisGoal", "drillDownTarget", "confidence", "personName"
     ));
     private static final Set<String> ALLOWED_METRICS = new HashSet<>(Arrays.asList(
             JijianQueryMetricEnum.TOTAL.getValue(),
@@ -95,8 +97,10 @@ public class JijianDeepSeekIntentClient implements JijianAiIntentClient {
 
     String buildIntentSystemPrompt() {
         return "\u4f60\u662f\u7eaa\u68c0\u67e5\u8be2\u6a21\u5757\u7684\u610f\u56fe\u89e3\u6790\u5668\u3002\u53ea\u8fd4\u56de JSON\uff0c\u4e0d\u8981 Markdown\uff0c\u4e0d\u8981\u89e3\u91ca\u3002\n"
-                + "\u53ea\u5141\u8bb8 key: formType, department, timeRange, metrics, needDetail, analysisGoal, drillDownTarget, confidence\u3002\n"
+                + "\u5141\u8bb8\u7684 key: formType, department, timeRange, metrics, needDetail, analysisGoal, drillDownTarget, confidence, personName\u3002\n"
                 + "formType \u53ea\u80fd\u4ece allowedFormTypes \u9009\u62e9\uff1bdepartment \u53ea\u80fd\u662f ALL \u6216 allowedDepartments \u4e2d\u7684\u503c\uff1btimeRange \u53ea\u80fd\u4ece allowedTimeRanges \u9009\u62e9\u3002\n"
+                + "personName: \u5982\u679c\u7528\u6237\u95ee\u9898\u4e2d\u5305\u542b\u7279\u5b9a\u4eba\u5458\u59d3\u540d\uff08\u5982\"\u674e\u829d\u7434\"\u3001\"\u5f20\u4e09\"\uff09\uff0c\u63d0\u53d6\u8be5\u59d3\u540d\u653e\u5165 personName\uff1b\u5426\u5219\u4e0d\u8bbe\u7f6e\u8be5\u5b57\u6bb5\u3002\n"
+                + "personName \u4ec5\u5141\u8bb8\u4e2d\u6587\u59d3\u540d\uff0c\u4e0d\u5141\u8bb8\u5305\u542b\u90e8\u95e8\u540d\u3001\u804c\u4f4d\u540d\u3001\u65f6\u95f4\u3001\u6570\u5b57\u7b49\u975e\u59d3\u540d\u5185\u5bb9\u3002\n"
                 + "\u4e0b\u62c9\u6846 hardFormType/hardDepartment/hardTimeRange \u662f\u786c\u9650\u5236\uff0c\u5b58\u5728\u65f6\u5fc5\u987b\u4e25\u683c\u6cbf\u7528\uff0c\u81ea\u7136\u8bed\u8a00\u4e0d\u80fd\u8986\u76d6\u3002\n"
                 + "\u4e0d\u5f97\u751f\u6210 SQL\uff0c\u4e0d\u5f97\u8981\u6c42\u6267\u884c SQL\uff0c\u4e0d\u5f97\u7f16\u9020\u8868\u540d\u3001\u5b57\u6bb5\u540d\u3001Mapper\u3001XML \u6216 schema\u3002\n"
                 + "\u4e0d\u5f97\u6269\u5927\u7b5b\u9009\u8303\u56f4\uff0c\u4e0d\u5f97\u628a\u591a\u5f20\u8868\u5408\u5e76\u6210\u4e00\u4e2a\u67e5\u8be2\u3002\n"
@@ -305,6 +309,11 @@ public class JijianDeepSeekIntentClient implements JijianAiIntentClient {
         if (node.path("confidence").isNumber()) {
             intent.setConfidence(node.path("confidence").asDouble());
         }
+        // personName: 只接受合理的中文姓名（2-4字），防止注入
+        String personName = textOrNull(node.path("personName"));
+        if (personName != null && personName.matches("[\\u4e00-\\u9fa5]{2,6}")) {
+            intent.setPersonName(personName);
+        }
         return intent;
     }
 
@@ -455,6 +464,96 @@ public class JijianDeepSeekIntentClient implements JijianAiIntentClient {
         }
         String value = node.asText(null);
         return value == null || value.isBlank() ? null : value;
+    }
+
+    public String analyzeDirectTableData(DirectAnalysisResult result, String userMessage) {
+        EffectiveDeepSeekConfig cfg = effectiveConfig();
+        if (!cfg.enabled || !hasUsableApiKey(cfg.apiKey)) {
+            return buildLocalDirectAnswer(result);
+        }
+        try {
+            String contextJson = buildDirectTableContextJson(result, userMessage);
+            String text = callDeepSeek(cfg, buildDirectTableSystemPrompt(), contextJson);
+            if (text == null || text.isBlank()) {
+                return buildLocalDirectAnswer(result);
+            }
+            return text.trim();
+        } catch (Exception e) {
+            log.warn("[JijianQueryAI] DeepSeek direct-table analysis failed, using local. reason={}", e.getMessage());
+            return buildLocalDirectAnswer(result);
+        }
+    }
+
+    private String buildDirectTableSystemPrompt() {
+        return "你是纪检信息系统的数据分析助手。\n"
+                + "你只能基于 databaseContext 中的数据（来自用户本地数据库）进行分析和回答。\n"
+                + "databaseContext.records 是后端从本地数据库查出的完整业务明细，是唯一事实来源。\n"
+                + "不得编造 records 中不存在的人员、日期、时长或记录。\n"
+                + "不得声称你访问了外部数据或互联网。\n"
+                + "不得生成 SQL，不得连接数据库，不得要求用户手动提供 databaseContext 已有数据。\n"
+                + "如果 databaseContext.records 为空，必须明确回答：当前数据库中未查询到符合条件的记录。\n"
+                + "如果有 records，必须逐条或汇总分析，给出具体日期、时长、部门、人员等真实信息。\n"
+                + "对于监管分析，要给出结论、依据、指标和异常点。\n"
+                + "用中文回答，200字以内，重点突出关键数字和具体记录。\n"
+                + "不得输出手机号、身份证、营业执照原文。";
+    }
+
+    private String buildDirectTableContextJson(DirectAnalysisResult result, String userMessage) {
+        ObjectNode ctx = objectMapper.createObjectNode();
+        ctx.put("analysisTask", "单表明细分析");
+        ctx.put("userQuestion", userMessage == null ? "" : userMessage);
+        ctx.put("dataSource", "local_database");
+        ctx.put("formType", result.getFormType());
+        ctx.put("timeRange", result.getTimeRangeLabel());
+        if (result.getPersonName() != null && !result.getPersonName().isBlank()) {
+            ctx.put("queryPersonName", result.getPersonName());
+        }
+        if (result.getDepartment() != null && !"ALL".equals(result.getDepartment())) {
+            ctx.put("queryDepartment", result.getDepartment());
+        }
+        ctx.put("totalRecordsInTable", result.getTotalCount());
+        ctx.put("matchedRecordCount", result.getFilteredRecords().size());
+
+        // schema 字段说明
+        ObjectNode schemaNode = ctx.putObject("schema");
+        if (result.getSchema() != null) {
+            result.getSchema().forEach(schemaNode::put);
+        }
+
+        // 完整 records（上限 200 条）
+        ArrayNode records = ctx.putArray("records");
+        int limit = Math.min(result.getFilteredRecords().size(), 200);
+        for (int i = 0; i < limit; i++) {
+            Map<String, Object> row = result.getFilteredRecords().get(i);
+            ObjectNode n = records.addObject();
+            row.forEach((k, v) -> n.put(k, v == null ? "" : v.toString()));
+        }
+        if (result.getFilteredRecords().size() > 200) {
+            ctx.put("truncated", true);
+            ctx.put("truncatedReason", "records 超过200条，已截取前200条");
+        }
+
+        ctx.put("fullRecordsIncluded", result.getFilteredRecords().size() <= 200);
+        ctx.put("sensitiveFieldsRemoved", false);
+        return ctx.toString();
+    }
+
+    private String buildLocalDirectAnswer(DirectAnalysisResult result) {
+        int count = result.getFilteredRecords().size();
+        String ft = result.getFormType();
+        String typeName;
+        if ("COMPENSATORY_LEAVE".equals(ft)) { typeName = "调休"; }
+        else if ("RECUPERATION_LEAVE".equals(ft)) { typeName = "疗休养"; }
+        else if ("PERSONAL_LEAVE".equals(ft)) { typeName = "事假"; }
+        else if ("BUSINESS_TRIP".equals(ft)) { typeName = "出差"; }
+        else { typeName = "记录"; }
+        if (count == 0) {
+            String who = result.getPersonName() != null ? result.getPersonName() : "该条件下";
+            return String.format("在当前数据库中，未查询到%s的%s记录（时间范围：%s）。",
+                    who, typeName, result.getTimeRangeLabel());
+        }
+        return String.format("已查询到%d条%s记录（时间范围：%s），请查看下方明细表格获取详情。",
+                count, typeName, result.getTimeRangeLabel());
     }
 
     private static class EffectiveDeepSeekConfig {

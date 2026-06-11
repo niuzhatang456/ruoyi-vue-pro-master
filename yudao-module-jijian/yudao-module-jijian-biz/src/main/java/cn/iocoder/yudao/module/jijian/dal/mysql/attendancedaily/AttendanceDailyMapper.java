@@ -20,6 +20,12 @@ public interface AttendanceDailyMapper extends BaseMapperX<AttendanceDailyDO> {
                 .eq(AttendanceDailyDO::getSourceParsedDataId, sourceParsedDataId));
     }
 
+    /** 统计指定批次已写入的有效行数（deleted=0，MyBatis-Plus 逻辑删除自动过滤） */
+    default long countBySourceParsedDataId(Long sourceParsedDataId) {
+        return selectCount(new LambdaQueryWrapperX<AttendanceDailyDO>()
+                .eq(AttendanceDailyDO::getSourceParsedDataId, sourceParsedDataId));
+    }
+
     // ========== P3 查询模块 ==========
 
     default PageResult<AttendanceDailyDO> selectPageForQuery(JijianAttendancePageReqVO req,

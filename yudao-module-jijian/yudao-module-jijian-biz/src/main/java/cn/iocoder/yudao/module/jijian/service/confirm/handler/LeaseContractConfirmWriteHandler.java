@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.jijian.service.confirm.handler;
 
+import cn.hutool.core.date.DateUtil;
 import cn.iocoder.yudao.module.jijian.dal.dataobject.leasecontract.LeaseContractDO;
 import cn.iocoder.yudao.module.jijian.dal.dataobject.parseddata.ParsedDataDO;
 import cn.iocoder.yudao.module.jijian.dal.mysql.leasecontract.LeaseContractMapper;
@@ -10,6 +11,7 @@ import cn.hutool.core.util.StrUtil;
 import org.springframework.stereotype.Component;
 import javax.annotation.Resource;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +41,8 @@ public class LeaseContractConfirmWriteHandler extends AbstractConfirmWriteHandle
                 try { amount = new BigDecimal(amountStr.replaceAll("[^0-9.]", "")); } catch (Exception ignored) {}
             }
             LeaseContractDO do_ = LeaseContractDO.builder()
+                    .contractStartTime(parseDateTime(get(row, "合同开始时间", "合同开始日期", "开始时间", "起租时间")))
+                    .contractEndTime(parseDateTime(get(row, "合同结束时间", "合同结束日期", "结束时间", "到期时间")))
                     .paymentStatus(get(row, "支付情况", "支付状态"))
                     .waterElectricityMgmt(get(row, "水电费管理", "水电"))
                     .contractSummary(get(row, "合同内容摘要", "合同摘要", "摘要"))
@@ -61,5 +65,20 @@ public class LeaseContractConfirmWriteHandler extends AbstractConfirmWriteHandle
                 "支付情况", d.getPaymentStatus(), "合同摘要", d.getContractSummary(), "记录ID", String.valueOf(d.getId())));
         }
         return result;
+    }
+
+    private LocalDateTime parseDateTime(String value) {
+        if (StrUtil.isBlank(value)) {
+            return null;
+        }
+        try {
+            return DateUtil.parseLocalDateTime(value);
+        } catch (Exception ignored) {
+            try {
+                return DateUtil.parse(value).toLocalDateTime();
+            } catch (Exception ignoredAgain) {
+                return null;
+            }
+        }
     }
 }

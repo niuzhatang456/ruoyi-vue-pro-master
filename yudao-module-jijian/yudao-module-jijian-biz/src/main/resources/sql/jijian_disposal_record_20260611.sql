@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS `jijian_disposal_record` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键编号',
+  `query_history_id` bigint DEFAULT NULL COMMENT '关联查询历史编号',
+  `query_question` text NOT NULL COMMENT '用户原始问题快照',
+  `query_answer` longtext DEFAULT NULL COMMENT 'AI 回答快照',
+  `query_result_json` longtext DEFAULT NULL COMMENT '脱敏后的系统查询结果 JSON 快照',
+  `disposal_opinion` text NOT NULL COMMENT '处置意见',
+  `disposal_user_id` bigint NOT NULL COMMENT '处置用户编号',
+  `disposal_user_name` varchar(64) DEFAULT NULL COMMENT '处置用户名称快照',
+  `disposal_time` datetime NOT NULL COMMENT '处置时间',
+  `source_module` varchar(64) NOT NULL DEFAULT 'smart_query' COMMENT '来源模块',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  `creator` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updater` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` bit(1) NOT NULL DEFAULT b'0' COMMENT '是否删除',
+  `tenant_id` bigint NOT NULL DEFAULT 0 COMMENT '租户编号',
+  PRIMARY KEY (`id`),
+  KEY `idx_query_history_id` (`query_history_id`),
+  KEY `idx_disposal_user_time` (`disposal_user_id`, `disposal_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='纪检查询处置记录';

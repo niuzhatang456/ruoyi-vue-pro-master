@@ -75,96 +75,100 @@ const remainingRouter: AppRouteRecordRaw[] = [
   {
     path: '/input',
     component: Layout,
-    redirect: '/input/drag',
+    redirect: '/input/property-group',
     name: 'JijianInput',
     meta: {
-      title: '录入',
+      title: '录入数据',
       icon: 'ep:upload',
-      alwaysShow: true
+      alwaysShow: true,
+      hidden: true
     },
     children: [
+      // ─── 分组入口（侧边栏可见）───────────────────────────────────────────
       {
-        path: 'drag',
-        component: () => import('@/views/jijian/input/Drag.vue'),
-        name: 'JijianInputDrag',
-        meta: {
-          title: '拖拽录入',
-          icon: 'ep:folder-add'
-        }
+        path: 'property-group',
+        component: () => import('@/views/jijian/input/PropertyGroup.vue'),
+        name: 'JijianInputPropertyGroup',
+        meta: { title: '房产情况', icon: 'ep:office-building' }
       },
       {
-        path: 'ocr',
-        component: () => import('@/views/jijian/input/Ocr.vue'),
-        name: 'JijianInputOcr',
-        meta: {
-          title: '图片/文件识别录入',
-          icon: 'ep:picture',
-          hidden: true
-        }
-      },
-      {
-        path: 'excel',
-        component: () => import('@/views/jijian/input/Excel.vue'),
-        name: 'JijianInputExcel',
-        meta: {
-          title: 'Excel录入',
-          icon: 'ep:document',
-          hidden: true
-        }
-      },
-      {
-        path: 'property-info',
-        component: () => import('@/views/jijian/input/PropertyInfo.vue'),
-        name: 'JijianInputPropertyInfo',
-        meta: { title: '房产情况表', icon: 'ep:office-building' }
-      },
-      {
-        path: 'lessee',
-        component: () => import('@/views/jijian/input/Lessee.vue'),
-        name: 'JijianInputLessee',
-        meta: { title: '租赁人员表', icon: 'ep:user' }
-      },
-      {
-        path: 'lease-contract',
-        component: () => import('@/views/jijian/input/LeaseContract.vue'),
-        name: 'JijianInputLeaseContract',
-        meta: { title: '租赁合同表', icon: 'ep:document' }
-      },
-      {
-        path: 'attendance-daily',
-        component: () => import('@/views/jijian/input/AttendanceDaily.vue'),
-        name: 'JijianInputAttendanceDaily',
-        meta: { title: '考勤日报表', icon: 'ep:calendar' }
-      },
-      {
-        path: 'recuperation-leave',
-        component: () => import('@/views/jijian/input/RecuperationLeave.vue'),
-        name: 'JijianInputRecuperationLeave',
-        meta: { title: '疗休养请假表', icon: 'ep:first-aid-kit' }
-      },
-      {
-        path: 'personal-leave',
-        component: () => import('@/views/jijian/input/PersonalLeave.vue'),
-        name: 'JijianInputPersonalLeave',
-        meta: { title: '事假表', icon: 'ep:tickets' }
-      },
-      {
-        path: 'business-trip',
-        component: () => import('@/views/jijian/input/BusinessTrip.vue'),
-        name: 'JijianInputBusinessTrip',
-        meta: { title: '出差表', icon: 'ep:map-location' }
-      },
-      {
-        path: 'compensatory-leave',
-        component: () => import('@/views/jijian/input/CompensatoryLeave.vue'),
-        name: 'JijianInputCompensatoryLeave',
-        meta: { title: '调休表', icon: 'ep:clock' }
+        path: 'attendance-group',
+        component: () => import('@/views/jijian/input/AttendanceGroup.vue'),
+        name: 'JijianInputAttendanceGroup',
+        meta: { title: '考勤情况', icon: 'ep:calendar' }
       },
       {
         path: 'canteen-supplier',
         component: () => import('@/views/jijian/input/CanteenSupplier.vue'),
         name: 'JijianInputCanteenSupplier',
-        meta: { title: '食堂供应商信息表', icon: 'ep:food' }
+        meta: { title: '食堂供应', icon: 'ep:food' }
+      },
+      {
+        path: 'drag',
+        component: () => import('@/views/jijian/input/Drag.vue'),
+        name: 'JijianInputDrag',
+        meta: { title: '拖拽录入', icon: 'ep:folder-add' }
+      },
+      // ─── 旧单表入口（保留路由可访问，但隐藏侧边栏）────────────────────────
+      {
+        path: 'ocr',
+        component: () => import('@/views/jijian/input/Ocr.vue'),
+        name: 'JijianInputOcr',
+        meta: { title: '图片/文件识别录入', icon: 'ep:picture', hidden: true }
+      },
+      {
+        path: 'excel',
+        component: () => import('@/views/jijian/input/Excel.vue'),
+        name: 'JijianInputExcel',
+        meta: { title: 'Excel录入', icon: 'ep:document', hidden: true }
+      },
+      {
+        path: 'property-info',
+        component: () => import('@/views/jijian/input/PropertyInfo.vue'),
+        name: 'JijianInputPropertyInfo',
+        meta: { title: '房产情况表', icon: 'ep:office-building', hidden: true }
+      },
+      {
+        path: 'lessee',
+        component: () => import('@/views/jijian/input/Lessee.vue'),
+        name: 'JijianInputLessee',
+        meta: { title: '租赁人员表', icon: 'ep:user', hidden: true }
+      },
+      {
+        path: 'lease-contract',
+        component: () => import('@/views/jijian/input/LeaseContract.vue'),
+        name: 'JijianInputLeaseContract',
+        meta: { title: '租赁合同表', icon: 'ep:document', hidden: true }
+      },
+      {
+        path: 'attendance-daily',
+        component: () => import('@/views/jijian/input/AttendanceDaily.vue'),
+        name: 'JijianInputAttendanceDaily',
+        meta: { title: '考勤日报表', icon: 'ep:calendar', hidden: true }
+      },
+      {
+        path: 'recuperation-leave',
+        component: () => import('@/views/jijian/input/RecuperationLeave.vue'),
+        name: 'JijianInputRecuperationLeave',
+        meta: { title: '疗休养请假表', icon: 'ep:first-aid-kit', hidden: true }
+      },
+      {
+        path: 'personal-leave',
+        component: () => import('@/views/jijian/input/PersonalLeave.vue'),
+        name: 'JijianInputPersonalLeave',
+        meta: { title: '事假表', icon: 'ep:tickets', hidden: true }
+      },
+      {
+        path: 'business-trip',
+        component: () => import('@/views/jijian/input/BusinessTrip.vue'),
+        name: 'JijianInputBusinessTrip',
+        meta: { title: '出差表', icon: 'ep:map-location', hidden: true }
+      },
+      {
+        path: 'compensatory-leave',
+        component: () => import('@/views/jijian/input/CompensatoryLeave.vue'),
+        name: 'JijianInputCompensatoryLeave',
+        meta: { title: '调休表', icon: 'ep:clock', hidden: true }
       }
     ]
   },
@@ -174,9 +178,10 @@ const remainingRouter: AppRouteRecordRaw[] = [
     redirect: '/query/smart',
     name: 'JijianQuery',
     meta: {
-      title: '查询模块',
+      title: '查询信息',
       icon: 'ep:search',
-      alwaysShow: true
+      alwaysShow: true,
+      hidden: true
     },
     children: [
       {
@@ -184,7 +189,7 @@ const remainingRouter: AppRouteRecordRaw[] = [
         component: () => import('@/views/jijian/query/Smart.vue'),
         name: 'JijianQuerySmart',
         meta: {
-          title: '智能查询',
+          title: '智能AI查询',
           icon: 'ep:chat-dot-round'
         }
       }
@@ -198,7 +203,8 @@ const remainingRouter: AppRouteRecordRaw[] = [
     meta: {
       title: '我的',
       icon: 'ep:user',
-      alwaysShow: true
+      alwaysShow: true,
+      hidden: true
     },
     children: [
       {
@@ -211,12 +217,12 @@ const remainingRouter: AppRouteRecordRaw[] = [
         }
       },
       {
-        path: 'favorites',
-        component: () => import('@/views/jijian/me/Favorites.vue'),
-        name: 'JijianMeFavorites',
+        path: 'disposal',
+        component: () => import('@/views/jijian/me/Disposal.vue'),
+        name: 'JijianMeDisposal',
         meta: {
-          title: '常用查询内容',
-          icon: 'ep:star'
+          title: '处置记录',
+          icon: 'ep:document-checked'
         }
       },
       {
@@ -411,558 +417,6 @@ const remainingRouter: AppRouteRecordRaw[] = [
       hidden: true,
       breadcrumb: false
     }
-  },
-  {
-    path: '/bpm',
-    component: Layout,
-    name: 'bpm',
-    meta: {
-      hidden: true
-    },
-    children: [
-      {
-        path: 'manager/form/edit',
-        component: () => import('@/views/bpm/form/editor/index.vue'),
-        name: 'BpmFormEditor',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '设计流程表单',
-          activeMenu: '/bpm/manager/form'
-        }
-      },
-      {
-        path: 'manager/definition',
-        component: () => import('@/views/bpm/model/definition/index.vue'),
-        name: 'BpmProcessDefinition',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '流程定义',
-          activeMenu: '/bpm/manager/model'
-        }
-      },
-      {
-        path: 'process-instance/detail',
-        component: () => import('@/views/bpm/processInstance/detail/index.vue'),
-        name: 'BpmProcessInstanceDetail',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '流程详情',
-          activeMenu: '/bpm/task/my'
-        },
-        props: (route) => ({
-          id: route.query.id,
-          taskId: route.query.taskId,
-          activityId: route.query.activityId
-        })
-      },
-      {
-        path: 'process-instance/report',
-        component: () => import('@/views/bpm/processInstance/report/index.vue'),
-        name: 'BpmProcessInstanceReport',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '数据报表',
-          activeMenu: '/bpm/manager/model'
-        }
-      },
-      {
-        path: 'oa/leave/create',
-        component: () => import('@/views/bpm/oa/leave/create.vue'),
-        name: 'OALeaveCreate',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '发起 OA 请假',
-          activeMenu: '/bpm/oa/leave'
-        }
-      },
-      {
-        path: 'oa/leave/detail',
-        component: () => import('@/views/bpm/oa/leave/detail.vue'),
-        name: 'OALeaveDetail',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '查看 OA 请假',
-          activeMenu: '/bpm/oa/leave'
-        }
-      },
-      {
-        path: 'manager/model/create',
-        component: () => import('@/views/bpm/model/form/index.vue'),
-        name: 'BpmModelCreate',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '创建流程',
-          activeMenu: '/bpm/manager/model'
-        }
-      },
-      {
-        path: 'manager/model/:type/:id',
-        component: () => import('@/views/bpm/model/form/index.vue'),
-        name: 'BpmModelUpdate',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '修改流程',
-          activeMenu: '/bpm/manager/model'
-        }
-      }
-    ]
-  },
-  {
-    path: '/mall/product', // 商品中心
-    component: Layout,
-    name: 'ProductCenter',
-    meta: {
-      hidden: true
-    },
-    children: [
-      {
-        path: 'spu/add',
-        component: () => import('@/views/mall/product/spu/form/index.vue'),
-        name: 'ProductSpuAdd',
-        meta: {
-          noCache: false, // 需要缓存
-          hidden: true,
-          canTo: true,
-          icon: 'ep:edit',
-          title: '商品添加',
-          activeMenu: '/mall/product/spu'
-        }
-      },
-      {
-        path: 'spu/edit/:id(\\d+)',
-        component: () => import('@/views/mall/product/spu/form/index.vue'),
-        name: 'ProductSpuEdit',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          icon: 'ep:edit',
-          title: '商品编辑',
-          activeMenu: '/mall/product/spu'
-        }
-      },
-      {
-        path: 'spu/detail/:id(\\d+)',
-        component: () => import('@/views/mall/product/spu/form/index.vue'),
-        name: 'ProductSpuDetail',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          icon: 'ep:view',
-          title: '商品详情',
-          activeMenu: '/mall/product/spu'
-        }
-      },
-      {
-        path: 'property/value/:propertyId(\\d+)',
-        component: () => import('@/views/mall/product/property/value/index.vue'),
-        name: 'ProductPropertyValue',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          icon: 'ep:view',
-          title: '商品属性值',
-          activeMenu: '/product/property'
-        }
-      }
-    ]
-  },
-  {
-    path: '/mall/trade', // 交易中心
-    component: Layout,
-    name: 'TradeCenter',
-    meta: {
-      hidden: true
-    },
-    children: [
-      {
-        path: 'order/detail/:id(\\d+)',
-        component: () => import('@/views/mall/trade/order/detail/index.vue'),
-        name: 'TradeOrderDetail',
-        meta: { title: '订单详情', icon: 'ep:view', activeMenu: '/mall/trade/order' }
-      },
-      {
-        path: 'after-sale/detail/:id(\\d+)',
-        component: () => import('@/views/mall/trade/afterSale/detail/index.vue'),
-        name: 'TradeAfterSaleDetail',
-        meta: { title: '退款详情', icon: 'ep:view', activeMenu: '/mall/trade/after-sale' }
-      }
-    ]
-  },
-  {
-    path: '/member',
-    component: Layout,
-    name: 'MemberCenter',
-    meta: { hidden: true },
-    children: [
-      {
-        path: 'user/detail/:id',
-        name: 'MemberUserDetail',
-        meta: {
-          title: '会员详情',
-          noCache: true,
-          hidden: true
-        },
-        component: () => import('@/views/member/user/detail/index.vue')
-      }
-    ]
-  },
-  {
-    path: '/pay',
-    component: Layout,
-    name: 'pay',
-    meta: { hidden: true },
-    children: [
-      {
-        path: 'cashier',
-        name: 'PayCashier',
-        meta: {
-          title: '收银台',
-          noCache: true,
-          hidden: true
-        },
-        component: () => import('@/views/pay/cashier/index.vue')
-      }
-    ]
-  },
-  {
-    path: '/diy',
-    name: 'DiyCenter',
-    meta: { hidden: true },
-    component: Layout,
-    children: [
-      {
-        path: 'template/decorate/:id',
-        name: 'DiyTemplateDecorate',
-        meta: {
-          title: '模板装修',
-          noCache: false,
-          hidden: true,
-          activeMenu: '/mall/promotion/diy-template/diy-template'
-        },
-        component: () => import('@/views/mall/promotion/diy/template/decorate.vue')
-      },
-      {
-        path: 'page/decorate/:id',
-        name: 'DiyPageDecorate',
-        meta: {
-          title: '页面装修',
-          noCache: false,
-          hidden: true,
-          activeMenu: '/mall/promotion/diy-template/diy-page'
-        },
-        component: () => import('@/views/mall/promotion/diy/page/decorate.vue')
-      }
-    ]
-  },
-  {
-    path: '/crm',
-    component: Layout,
-    name: 'CrmCenter',
-    meta: { hidden: true },
-    children: [
-      {
-        path: 'clue/detail/:id',
-        name: 'CrmClueDetail',
-        meta: {
-          title: '线索详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/crm/clue'
-        },
-        component: () => import('@/views/crm/clue/detail/index.vue')
-      },
-      {
-        path: 'customer/detail/:id',
-        name: 'CrmCustomerDetail',
-        meta: {
-          title: '客户详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/crm/customer'
-        },
-        component: () => import('@/views/crm/customer/detail/index.vue')
-      },
-      {
-        path: 'business/detail/:id',
-        name: 'CrmBusinessDetail',
-        meta: {
-          title: '商机详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/crm/business'
-        },
-        component: () => import('@/views/crm/business/detail/index.vue')
-      },
-      {
-        path: 'contract/detail/:id',
-        name: 'CrmContractDetail',
-        meta: {
-          title: '合同详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/crm/contract'
-        },
-        component: () => import('@/views/crm/contract/detail/index.vue')
-      },
-      {
-        path: 'receivable-plan/detail/:id',
-        name: 'CrmReceivablePlanDetail',
-        meta: {
-          title: '回款计划详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/crm/receivable-plan'
-        },
-        component: () => import('@/views/crm/receivable/plan/detail/index.vue')
-      },
-      {
-        path: 'receivable/detail/:id',
-        name: 'CrmReceivableDetail',
-        meta: {
-          title: '回款详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/crm/receivable'
-        },
-        component: () => import('@/views/crm/receivable/detail/index.vue')
-      },
-      {
-        path: 'contact/detail/:id',
-        name: 'CrmContactDetail',
-        meta: {
-          title: '联系人详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/crm/contact'
-        },
-        component: () => import('@/views/crm/contact/detail/index.vue')
-      },
-      {
-        path: 'product/detail/:id',
-        name: 'CrmProductDetail',
-        meta: {
-          title: '产品详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/crm/product'
-        },
-        component: () => import('@/views/crm/product/detail/index.vue')
-      }
-    ]
-  },
-  {
-    path: '/ai',
-    component: Layout,
-    name: 'Ai',
-    meta: {
-      hidden: true
-    },
-    children: [
-      {
-        path: 'image/square',
-        component: () => import('@/views/ai/image/square/index.vue'),
-        name: 'AiImageSquare',
-        meta: {
-          title: '绘图作品',
-          icon: 'ep:home-filled',
-          noCache: false
-        }
-      },
-      {
-        path: 'knowledge/document',
-        component: () => import('@/views/ai/knowledge/document/index.vue'),
-        name: 'AiKnowledgeDocument',
-        meta: {
-          title: '知识库文档',
-          icon: 'ep:document',
-          noCache: false,
-          activeMenu: '/ai/knowledge'
-        }
-      },
-      {
-        path: 'knowledge/document/create',
-        component: () => import('@/views/ai/knowledge/document/form/index.vue'),
-        name: 'AiKnowledgeDocumentCreate',
-        meta: {
-          title: '创建文档',
-          icon: 'ep:plus',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/ai/knowledge'
-        }
-      },
-      {
-        path: 'knowledge/document/update',
-        component: () => import('@/views/ai/knowledge/document/form/index.vue'),
-        name: 'AiKnowledgeDocumentUpdate',
-        meta: {
-          title: '修改文档',
-          icon: 'ep:edit',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/ai/knowledge'
-        }
-      },
-      {
-        path: 'knowledge/retrieval',
-        component: () => import('@/views/ai/knowledge/knowledge/retrieval/index.vue'),
-        name: 'AiKnowledgeRetrieval',
-        meta: {
-          title: '文档召回测试',
-          icon: 'ep:search',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/ai/knowledge'
-        }
-      },
-      {
-        path: 'knowledge/segment',
-        component: () => import('@/views/ai/knowledge/segment/index.vue'),
-        name: 'AiKnowledgeSegment',
-        meta: {
-          title: '知识库分段',
-          icon: 'ep:tickets',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/ai/knowledge'
-        }
-      },
-      {
-        path: 'console/workflow/create',
-        component: () => import('@/views/ai/workflow/form/index.vue'),
-        name: 'AiWorkflowCreate',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '设计 AI 工作流',
-          activeMenu: '/ai/console/workflow'
-        }
-      },
-      {
-        path: 'console/workflow/:type/:id',
-        component: () => import('@/views/ai/workflow/form/index.vue'),
-        name: 'AiWorkflowUpdate',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          title: '设计 AI 工作流',
-          activeMenu: '/ai/console/workflow'
-        }
-      }
-    ]
-  },
-  {
-    path: '/iot',
-    component: Layout,
-    name: 'IOT',
-    meta: {
-      hidden: true
-    },
-    children: [
-      {
-        path: 'product/product/detail/:id',
-        name: 'IoTProductDetail',
-        meta: {
-          title: '产品详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/iot/device/product'
-        },
-        component: () => import('@/views/iot/product/product/detail/index.vue')
-      },
-      {
-        path: 'device/detail/:id',
-        name: 'IoTDeviceDetail',
-        meta: {
-          title: '设备详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/iot/device/device'
-        },
-        component: () => import('@/views/iot/device/device/detail/index.vue')
-      },
-      {
-        path: 'ota/operation/firmware/detail/:id',
-        name: 'IoTOtaFirmwareDetail',
-        meta: {
-          title: '固件详情',
-          noCache: true,
-          hidden: true,
-          activeMenu: '/iot/operation/ota/firmware'
-        },
-        component: () => import('@/views/iot/ota/firmware/detail/index.vue')
-      }
-    ]
-  },
-  {
-    path: '/mes',
-    component: Layout,
-    name: 'MesWmRouter',
-    meta: {
-      hidden: true
-    },
-    children: [
-      {
-        path: 'wm/warehouse/location',
-        component: () => import('@/views/mes/wm/warehouse/location/index.vue'),
-        name: 'MesWmLocation',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          icon: '',
-          title: '库区设置',
-          activeMenu: '/mes/wm/warehouse'
-        }
-      },
-      {
-        path: 'wm/warehouse/area',
-        component: () => import('@/views/mes/wm/warehouse/area/index.vue'),
-        name: 'MesWmArea',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          icon: '',
-          title: '库位设置',
-          activeMenu: '/mes/wm/warehouse'
-        }
-      },
-      {
-        path: 'pro/task/gantt-edit',
-        component: () => import('@/views/mes/pro/task/edit/index.vue'),
-        name: 'MesProTaskGanttEdit',
-        meta: {
-          noCache: true,
-          hidden: true,
-          canTo: true,
-          icon: '',
-          title: '甘特图编辑',
-          activeMenu: '/mes/pro/task'
-        }
-      }
-    ]
   }
 ]
 

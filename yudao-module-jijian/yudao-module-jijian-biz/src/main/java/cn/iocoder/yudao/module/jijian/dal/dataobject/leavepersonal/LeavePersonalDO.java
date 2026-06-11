@@ -23,7 +23,7 @@ public class LeavePersonalDO extends TenantBaseDO {
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private BigDecimal leaveDays;
-    private Boolean isOutside;
+    private String isOutside;         // 原文：出义/不出义/是/否
     private String outsideLocation;
     private String leaveStatus;
     private String leaveMonth;

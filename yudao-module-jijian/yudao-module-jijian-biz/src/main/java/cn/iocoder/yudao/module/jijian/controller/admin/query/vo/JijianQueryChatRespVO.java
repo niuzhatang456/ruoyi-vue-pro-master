@@ -13,6 +13,9 @@ import java.util.Map;
 @Data
 public class JijianQueryChatRespVO {
 
+    @Schema(description = "查询历史 ID")
+    private Long queryHistoryId;
+
     @Schema(description = "会话 ID")
     private String conversationId;
 
@@ -53,4 +56,24 @@ public class JijianQueryChatRespVO {
 
     @Schema(description = "数据库数据包元信息")
     private JijianDatabaseContextMetaVO databaseContextMeta;
+
+    @Schema(description = "SQL 查询追踪列表（SQL Agent 模式下返回）")
+    private List<JijianSqlTraceVO> sqlTrace = Collections.emptyList();
+
+    // ===== 耗时统计 =====
+
+    @Schema(description = "总耗时（毫秒）")
+    private Long totalElapsedMs;
+
+    @Schema(description = "意图识别耗时（毫秒）")
+    private Long intentElapsedMs;
+
+    @Schema(description = "数据库 SQL 执行累计耗时（毫秒）")
+    private Long sqlElapsedMs;
+
+    @Schema(description = "DeepSeek 调用累计耗时（毫秒）")
+    private Long deepSeekElapsedMs;
+
+    @Schema(description = "SQL 查询轮次数")
+    private Integer sqlRoundCount;
 }

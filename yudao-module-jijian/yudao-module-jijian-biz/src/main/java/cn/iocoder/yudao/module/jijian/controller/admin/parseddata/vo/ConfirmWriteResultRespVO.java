@@ -27,4 +27,21 @@ public class ConfirmWriteResultRespVO {
     @Schema(description = "写入的正式业务表名", example = "jijian_canteen_supplier")
     private String businessTable;
 
+    // ── 导入统计 ──────────────────────────────────────────────────────────────
+
+    @Schema(description = "原始解析总行数")
+    private Integer totalRows;
+
+    @Schema(description = "跳过行数（空白行 / 合计行）")
+    private Integer skippedRows;
+
+    @Schema(description = "失败行数（有业务字段但关键字段缺失或解析异常）")
+    private Integer failedRows;
+
+    @Schema(description = "跳过行原因列表（最多 20 条）")
+    private List<String> skippedMessages;
+
+    @Schema(description = "失败行原因列表（最多 20 条）")
+    private List<String> failedMessages;
+
 }

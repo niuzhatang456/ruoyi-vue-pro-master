@@ -27,5 +27,6 @@ public class AttendanceDailyDO extends TenantBaseDO {
     private String checkoutLocation;
     private String checkoutRemark;
     private LocalDate attendanceDate;
+    private String weekDay;
     private Long sourceParsedDataId;
 }

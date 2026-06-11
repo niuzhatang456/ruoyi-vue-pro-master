@@ -3,6 +3,8 @@ package cn.iocoder.yudao.module.jijian.controller.admin.parseddata;
 import cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog;
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.module.jijian.controller.admin.parseddata.vo.ConfirmPropertyRespVO;
+import cn.iocoder.yudao.module.jijian.controller.admin.parseddata.vo.DeleteBusinessDataRespVO;
+import cn.iocoder.yudao.module.jijian.service.parseddata.ParsedDataService.DeleteBusinessDataResult;
 import cn.iocoder.yudao.module.jijian.controller.admin.parseddata.vo.ConfirmWriteResultRespVO;
 import cn.iocoder.yudao.module.jijian.controller.admin.parseddata.vo.ParsedDataRespVO;
 import cn.iocoder.yudao.module.jijian.controller.admin.parseddata.vo.SaveCorrectionReqVO;
@@ -16,6 +18,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -51,6 +54,7 @@ public class ParsedDataController {
 
     @GetMapping("/{importRecordId}")
     @Operation(summary = "按导入记录 ID 查最新解析结果")
+    @PreAuthorize("@ss.hasPermission('jijian:import:query')")
     @Parameter(name = "importRecordId", description = "导入记录 ID", required = true)
     public CommonResult<ParsedDataRespVO> getParsedData(@PathVariable("importRecordId") Long importRecordId) {
         return success(convert(parsedDataService.getLatestParsedData(importRecordId)));
@@ -58,6 +62,7 @@ public class ParsedDataController {
 
     @GetMapping("/list")
     @Operation(summary = "按导入记录 ID 查全部解析结果")
+    @PreAuthorize("@ss.hasPermission('jijian:import:query')")
     public CommonResult<List<ParsedDataRespVO>> getParsedDataList(
             @RequestParam(value = "importRecordId", required = false) Long importRecordId) {
         return success(parsedDataService.getParsedDataList(importRecordId).stream()
@@ -66,6 +71,7 @@ public class ParsedDataController {
 
     @GetMapping("/detail/{parsedDataId}")
     @Operation(summary = "按解析记录 ID 查单条解析结果")
+    @PreAuthorize("@ss.hasPermission('jijian:import:query')")
     @Parameter(name = "parsedDataId", description = "解析数据 ID", required = true)
     public CommonResult<ParsedDataRespVO> getParsedDataDetail(@PathVariable("parsedDataId") Long parsedDataId) {
         return success(convert(parsedDataService.getParsedDataById(parsedDataId)));
@@ -101,6 +107,11 @@ public class ParsedDataController {
         respVO.setConfirmedIds(result.getConfirmedIds());
         respVO.setConfirmedCount(result.getConfirmedCount());
         respVO.setIdempotent(result.isIdempotent());
+        respVO.setTotalRows(result.getTotalRows());
+        respVO.setSkippedRows(result.getSkippedRows());
+        respVO.setFailedRows(result.getFailedRows());
+        respVO.setSkippedMessages(result.getSkippedMessages());
+        respVO.setFailedMessages(result.getFailedMessages());
         return success(respVO);
     }
 
@@ -118,6 +129,24 @@ public class ParsedDataController {
         ConfirmPropertyRespVO respVO = new ConfirmPropertyRespVO();
         respVO.setParsedDataId(parsedDataId);
         respVO.setPropertyId(propertyId);
+        return success(respVO);
+    }
+
+    // ─── 删除导入批次业务数据 ────────────────────────────────────────────────
+
+    @DeleteMapping("/{parsedDataId}/business-data")
+    @Operation(summary = "删除某次导入批次写入的业务数据（仅删 source_parsed_data_id 匹配的记录）")
+    @Parameter(name = "parsedDataId", description = "解析数据 ID", required = true)
+    @PreAuthorize("@ss.hasPermission('jijian:import:delete')")
+    @ApiAccessLog(operateType = UPDATE)
+    public CommonResult<DeleteBusinessDataRespVO> deleteBusinessData(
+            @PathVariable("parsedDataId") Long parsedDataId) {
+        DeleteBusinessDataResult result = parsedDataService.deleteBusinessDataByParsedDataId(parsedDataId);
+        DeleteBusinessDataRespVO respVO = new DeleteBusinessDataRespVO();
+        respVO.setParsedDataId(result.parsedDataId);
+        respVO.setBusinessTable(result.businessTable);
+        respVO.setDeletedRows(result.deletedRows);
+        respVO.setMessage(result.message);
         return success(respVO);
     }
 

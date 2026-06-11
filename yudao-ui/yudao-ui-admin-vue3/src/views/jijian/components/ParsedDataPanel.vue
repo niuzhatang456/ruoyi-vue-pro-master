@@ -42,15 +42,50 @@
     <!-- ── 确认写入区域 ── -->
     <div v-else class="confirm-area mt-12px">
       <!-- 已确认 -->
-      <el-alert v-if="isConfirmed" type="success" :closable="false" show-icon>
-        <template #title>
-          <span>
-            已确认写入「{{ confirmedFormType }}」{{ confirmedBusinessTable ? '→ ' + confirmedBusinessTable : '' }}，共 {{ confirmedCount }} 条记录
-            <template v-if="confirmedIds.length > 0">，记录 ID：{{ confirmedIds.join('、') }}</template>
-            <el-tag v-if="wasIdempotent" type="info" size="small" class="ml-8px">重复操作已幂等</el-tag>
-          </span>
-        </template>
-      </el-alert>
+      <template v-if="isConfirmed">
+        <el-alert :type="confirmedAlertType" :closable="false" show-icon>
+          <template #title>
+            <span>
+              已确认写入「{{ confirmedFormType }}」{{ confirmedBusinessTable ? ' → ' + confirmedBusinessTable : '' }}
+              <template v-if="localResult?.totalRows != null">
+                ：共解析 <strong>{{ localResult.totalRows }}</strong> 行，
+                成功 <strong>{{ localResult.confirmedCount }}</strong> 行，
+                跳过 <strong>{{ localResult.skippedRows ?? 0 }}</strong> 行，
+                失败 <strong>{{ localResult.failedRows ?? 0 }}</strong> 行
+              </template>
+              <template v-else>
+                ，共 {{ confirmedCount }} 条记录
+                <template v-if="confirmedIds.length > 0">，记录 ID：{{ confirmedIds.slice(0, 5).join('、') }}{{ confirmedIds.length > 5 ? '…' : '' }}</template>
+              </template>
+              <el-tag v-if="wasIdempotent" type="info" size="small" class="ml-8px">重复操作已幂等</el-tag>
+            </span>
+          </template>
+        </el-alert>
+
+        <!-- 跳过行详情（可折叠） -->
+        <el-collapse v-if="(localResult?.skippedRows ?? 0) > 0" class="mt-8px detail-collapse">
+          <el-collapse-item :title="`跳过行明细（${localResult?.skippedRows} 行，均为空白行或合计行）`" name="skipped">
+            <ul class="detail-list">
+              <li v-for="(msg, idx) in (localResult?.skippedMessages ?? [])" :key="idx" class="skipped-item">{{ msg }}</li>
+              <li v-if="(localResult?.skippedMessages?.length ?? 0) < (localResult?.skippedRows ?? 0)" class="more-hint">
+                ……（更多行未展示，请查看后端日志）
+              </li>
+            </ul>
+          </el-collapse-item>
+        </el-collapse>
+
+        <!-- 失败行详情（可折叠，醒目展示） -->
+        <el-collapse v-if="(localResult?.failedRows ?? 0) > 0" class="mt-8px detail-collapse">
+          <el-collapse-item :title="`失败行明细（${localResult?.failedRows} 行，有业务字段但关键字段缺失）`" name="failed">
+            <ul class="detail-list">
+              <li v-for="(msg, idx) in (localResult?.failedMessages ?? [])" :key="idx" class="failed-item">{{ msg }}</li>
+              <li v-if="(localResult?.failedMessages?.length ?? 0) < (localResult?.failedRows ?? 0)" class="more-hint">
+                ……（更多行未展示，请查看后端日志）
+              </li>
+            </ul>
+          </el-collapse-item>
+        </el-collapse>
+      </template>
 
       <!-- 可操作 -->
       <div v-else-if="canConfirm" class="action-row">
@@ -61,17 +96,27 @@
       </div>
     </div>
 
-    <!-- ── 超行数警告 ── -->
+    <!-- ── 解析通知（如食堂供应未识别到日期等非阻断提示） ── -->
     <el-alert
-      v-if="showPreviewLimitBanner"
+      v-if="parsedNotice && !isConfirmed"
+      class="mt-8px"
+      type="warning"
+      :closable="true"
+      show-icon
+      :title="parsedNotice"
+    />
+
+    <!-- ── 大数据提示 ── -->
+    <el-alert
+      v-if="isLargeData"
       class="mt-8px"
       type="warning"
       :closable="false"
       show-icon
     >
       <template #title>
-        当前仅预览前 {{ PREVIEW_LIMIT }} 行（共 {{ totalRowCount }} 行）。
-        <strong>确认写入仍以完整数据为准。</strong>
+        当前文件共 <strong>{{ totalRowCount }}</strong> 行，采用分页预览（每页 {{ PAGE_SIZE }} 行）。
+        <strong>保存校正 / 确认写入均对完整数据有效。</strong>
       </template>
     </el-alert>
 
@@ -80,15 +125,23 @@
       <!-- 多行表格 -->
       <el-tab-pane
         v-if="tableHeaders.length > 0"
-        :label="`数据表格（${visibleRows.length} 行${totalRowCount > PREVIEW_LIMIT ? '，预览' : ''}）`"
+        :label="`数据表格（${totalRowCount} 行${isLargeData ? '，分页预览' : ''}）`"
         name="table"
       >
-        <el-text v-if="canConfirm" type="info" size="small" class="block mb-8px">
-          字段值可直接编辑，修改后点击「保存校正」再确认写入
-        </el-text>
+        <div class="table-toolbar mb-8px">
+          <el-space wrap>
+            <el-tag type="info" size="small">共 {{ totalRowCount }} 行 · 当前页 {{ pageStart + 1 }}–{{ pageEnd }} 行</el-tag>
+            <el-button v-if="canConfirm" size="small" plain @click="addRow">
+              <el-icon><Plus /></el-icon> 新增一行
+            </el-button>
+            <el-text type="info" size="small" v-if="canConfirm">
+              字段值可直接编辑，修改后点击「保存校正」再确认写入
+            </el-text>
+          </el-space>
+        </div>
         <div class="table-wrapper">
-          <el-table :data="visibleRows" border size="small" class="correction-table">
-            <el-table-column type="index" label="#" width="50" fixed />
+          <el-table :data="tableRows" border size="small" class="correction-table">
+            <el-table-column type="index" :index="pageStart + 1" label="#" width="60" fixed />
             <el-table-column
               v-for="header in tableHeaders"
               :key="header"
@@ -101,7 +154,24 @@
                 <span v-else>{{ row[header] ?? '' }}</span>
               </template>
             </el-table-column>
+            <el-table-column v-if="canConfirm" label="操作" width="70" fixed="right">
+              <template #default="{ $index }">
+                <el-button type="danger" size="small" link @click="deleteRow($index)">删除</el-button>
+              </template>
+            </el-table-column>
           </el-table>
+        </div>
+
+        <!-- 分页控件（数据量 > PAGE_SIZE 时显示） -->
+        <div v-if="isLargeData" class="pagination-bar mt-8px">
+          <el-pagination
+            v-model:current-page="currentPage"
+            :page-size="PAGE_SIZE"
+            :total="totalRowCount"
+            layout="prev, pager, next, jumper, total"
+            small
+            @current-change="onPageChange"
+          />
         </div>
       </el-tab-pane>
 
@@ -123,9 +193,9 @@
         <el-input :model-value="parsedData.rawText || '（无原始文本）'" type="textarea" :rows="6" readonly />
       </el-tab-pane>
 
-      <!-- JSON 视图 -->
+      <!-- JSON 视图（大文件只显示元信息，避免卡顿） -->
       <el-tab-pane label="结构化 JSON" name="json">
-        <pre class="json-view">{{ activeJsonPretty }}</pre>
+        <pre class="json-view">{{ jsonPreview }}</pre>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -133,118 +203,94 @@
 
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { confirmWrite, saveCorrection } from '@/api/jijian/import'
 import type { ParsedData } from '../types'
 
-const PREVIEW_LIMIT = 100
+// ── 常量 ────────────────────────────────────────────────────────────────────
+/** 每页展示行数（Vue 响应式对象上限）。超过此值时启用分页预览。 */
+const PAGE_SIZE = 200
+/** 超过此行数时才显示大数据提示和分页控件 */
+const LARGE_DATA_THRESHOLD = PAGE_SIZE
 
+// ── Props / Emits ─────────────────────────────────────────────────────────
 const props = defineProps<{ parsedData?: ParsedData | null }>()
 
 const emit = defineEmits<{
-  (event: 'confirmed', result: { formType: string; businessTable?: string; confirmedIds: number[]; confirmedCount: number }): void
+  (event: 'confirmed', result: {
+    formType: string
+    businessTable?: string
+    confirmedIds: number[]
+    confirmedCount: number
+  }): void
 }>()
 
-// ── 状态 ──────────────────────────────────────────────────────────────────
-const confirming    = ref(false)
-const saving        = ref(false)
+// ── 非响应式全量存储（避免 Vue 深度代理 15000+ 行对象导致卡死） ─────────────
+// 这是一个模块级普通数组，不被 Vue 跟踪，切换 parsedData 时手动清空重建。
+let _allRowsRaw: Record<string, string>[] = []
+
+// ── 响应式状态 ──────────────────────────────────────────────────────────────
+const confirming      = ref(false)
+const saving          = ref(false)
 const correctionSaved = ref(false)
-const hasEdited     = ref(false)
-const activeTab     = ref('table')
-const localResult   = ref<{ formType: string; businessTable?: string; confirmedIds: number[]; confirmedCount: number; idempotent: boolean } | null>(null)
+const hasEdited       = ref(false)
+const activeTab       = ref('table')
+const localResult     = ref<{
+  formType: string
+  businessTable?: string
+  confirmedIds: number[]
+  confirmedCount: number
+  idempotent: boolean
+  totalRows?: number
+  skippedRows?: number
+  failedRows?: number
+  skippedMessages?: string[]
+  failedMessages?: string[]
+} | null>(null)
 
-// ── 表格数据 ──────────────────────────────────────────────────────────────
-const tableHeaders = ref<string[]>([])
-const tableRows    = ref<Record<string, string>[]>([])
-const allRows      = ref<Record<string, string>[]>([])
-const kvFields     = ref<{ key: string; value: string }[]>([])
+const tableHeaders  = ref<string[]>([])
+/** 当前页的行数据（已深拷贝，可安全 v-model 编辑） */
+const tableRows     = ref<Record<string, string>[]>([])
+const kvFields      = ref<{ key: string; value: string }[]>([])
 const totalRowCount = ref(0)
+const currentPage   = ref(1)
 
-function normalizeHeaders(headers: unknown[]): { name: string; index: number }[] {
-  const seen = new Map<string, number>()
-  return headers
-    .map((header, index) => ({ name: header == null ? '' : String(header).trim(), index }))
-    .filter(({ name }) => name.length > 0)
-    .map(({ name, index }) => {
-      const count = (seen.get(name) || 0) + 1
-      seen.set(name, count)
-      return { name: count === 1 ? name : `${name}_${count}`, index }
-    })
-}
+// ── 计算属性 ────────────────────────────────────────────────────────────────
+const isLargeData  = computed(() => totalRowCount.value > LARGE_DATA_THRESHOLD)
 
-function initEditableData() {
-  tableHeaders.value = []
-  tableRows.value    = []
-  allRows.value      = []
-  kvFields.value     = []
-  totalRowCount.value = 0
-  hasEdited.value    = false
-  correctionSaved.value = false
-  localResult.value  = null
-  activeTab.value    = 'table'
-
+/** 读取 parsedJson 中的 ocrNotice 字段，用于展示非阻断提示（如食堂日期未识别） */
+const parsedNotice = computed<string>(() => {
   const source = props.parsedData?.correctedJson || props.parsedData?.parsedJson
-  if (!source) return
+  if (!source) return ''
   try {
     const obj = JSON.parse(source)
-    if (Array.isArray(obj.rows) && obj.rows.length > 0) {
-      totalRowCount.value = typeof obj.totalRows === 'number' ? obj.totalRows : obj.rows.length
-      const firstRow = obj.rows[0]
-      const sourceHeaders = Array.isArray(obj.headers)
-        ? obj.headers
-        : (Array.isArray(firstRow) ? firstRow.map((_: unknown, index: number) => `列${index + 1}`) : Object.keys(firstRow))
-      const headerDefs = normalizeHeaders(sourceHeaders)
-      tableHeaders.value = headerDefs.map(({ name }) => name)
-      allRows.value = obj.rows.map((row: unknown) => {
-        if (Array.isArray(row)) {
-          return Object.fromEntries(headerDefs.map(({ name, index }) => [name, row[index] == null ? '' : String(row[index])]))
-        }
-        const record = row as Record<string, unknown>
-        return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, value == null ? '' : String(value)]))
-      })
-      tableRows.value = allRows.value.slice(0, PREVIEW_LIMIT)
-    } else if (obj.textPreview) {
-      String(obj.textPreview).split('\n').forEach((line) => {
-        const idx = line.includes('：') ? line.indexOf('：') : line.indexOf(':')
-        if (idx > 0 && idx < line.length - 1) {
-          const k = line.substring(0, idx).trim()
-          const v = line.substring(idx + 1).trim()
-          if (k && v) kvFields.value.push({ key: k, value: v })
-        }
-      })
-      activeTab.value = 'kv'
-    }
-  } catch {
-    activeTab.value = 'raw'
-  }
-}
-
-watch(() => props.parsedData, initEditableData, { immediate: true, deep: false })
-
-// ── 计算属性 ──────────────────────────────────────────────────────────────
-const visibleRows = computed(() => tableRows.value)
-const showPreviewLimitBanner = computed(() =>
-  totalRowCount.value > PREVIEW_LIMIT && tableHeaders.value.length > 0
-)
+    return typeof obj.ocrNotice === 'string' ? obj.ocrNotice : ''
+  } catch { return '' }
+})
+const pageStart    = computed(() => (currentPage.value - 1) * PAGE_SIZE)
+const pageEnd      = computed(() => Math.min(currentPage.value * PAGE_SIZE, totalRowCount.value))
 
 const isConfirmed = computed(() =>
   props.parsedData?.confirmStatus === 'confirmed' ||
-  props.parsedData?.status === 'confirmed' ||   // 兼容旧记录：老代码把确认态写在 status 字段
+  props.parsedData?.status === 'confirmed' ||
   localResult.value !== null
 )
 const canConfirm = computed(() =>
   props.parsedData?.status === 'success' && !isConfirmed.value
 )
-const confirmedFormType = computed(() =>
-  localResult.value?.formType || props.parsedData?.formType || ''
-)
-const confirmedBusinessTable = computed(() =>
-  localResult.value?.businessTable || props.parsedData?.businessTable || ''
-)
-const confirmedIds = computed(() => localResult.value?.confirmedIds ?? [])
-const confirmedCount = computed(() =>
+const confirmedFormType      = computed(() => localResult.value?.formType || props.parsedData?.formType || '')
+const confirmedBusinessTable = computed(() => localResult.value?.businessTable || props.parsedData?.businessTable || '')
+const confirmedIds           = computed(() => localResult.value?.confirmedIds ?? [])
+const confirmedCount         = computed(() =>
   localResult.value?.confirmedCount ?? (props.parsedData?.confirmedPropertyId ? 1 : 0)
 )
 const wasIdempotent = computed(() => localResult.value?.idempotent ?? false)
+
+/** 有失败行时用 warning，否则用 success */
+const confirmedAlertType = computed(() => {
+  const failed = localResult.value?.failedRows ?? 0
+  return failed > 0 ? 'warning' : 'success'
+})
 
 const displayBusinessIds = computed(() => {
   const raw = props.parsedData?.businessIds
@@ -252,9 +298,7 @@ const displayBusinessIds = computed(() => {
   try {
     const arr = JSON.parse(raw)
     return Array.isArray(arr) ? arr.join(', ') : raw
-  } catch {
-    return raw
-  }
+  } catch { return raw }
 })
 
 const statusTagType = computed(() => {
@@ -275,22 +319,186 @@ const statusText = computed(() => {
     default: return '待处理'
   }
 })
-const activeJsonPretty = computed(() => {
+
+/**
+ * JSON 视图：大文件时只展示元信息，避免序列化 50MB+ JSON 字符串卡死浏览器。
+ */
+const jsonPreview = computed(() => {
   const raw = props.parsedData?.correctedJson || props.parsedData?.parsedJson || '{}'
+  if (totalRowCount.value > LARGE_DATA_THRESHOLD) {
+    try {
+      const obj = JSON.parse(raw)
+      const meta = {
+        fileName:  obj.fileName,
+        sheetName: obj.sheetName,
+        totalRows: obj.totalRows,
+        headers:   obj.headers,
+        rowsCount: Array.isArray(obj.rows) ? obj.rows.length : 0,
+        notice:    '（行数过多，完整数据未展示，请使用「数据表格」分页查看）',
+      }
+      return JSON.stringify(meta, null, 2)
+    } catch { return '（JSON 解析失败）' }
+  }
   try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
 })
 
-// ── 操作 ──────────────────────────────────────────────────────────────────
-function markEdited() { hasEdited.value = true; correctionSaved.value = false }
+// ── 数据初始化 ──────────────────────────────────────────────────────────────
+
+function normalizeHeaders(headers: unknown[]): { name: string; index: number }[] {
+  const seen = new Map<string, number>()
+  return headers
+    .map((header, index) => ({ name: header == null ? '' : String(header).trim(), index }))
+    .filter(({ name }) => name.length > 0)
+    .map(({ name, index }) => {
+      const count = (seen.get(name) || 0) + 1
+      seen.set(name, count)
+      return { name: count === 1 ? name : `${name}_${count}`, index }
+    })
+}
+
+function initEditableData() {
+  // 重置所有状态
+  tableHeaders.value  = []
+  tableRows.value     = []
+  kvFields.value      = []
+  totalRowCount.value = 0
+  hasEdited.value     = false
+  correctionSaved.value = false
+  localResult.value   = null
+  activeTab.value     = 'table'
+  currentPage.value   = 1
+  _allRowsRaw         = []   // 清空非响应式存储
+
+  const source = props.parsedData?.correctedJson || props.parsedData?.parsedJson
+  if (!source) return
+  try {
+    const obj = JSON.parse(source)
+
+    if (Array.isArray(obj.rows) && obj.rows.length > 0) {
+      totalRowCount.value = typeof obj.totalRows === 'number' ? obj.totalRows : obj.rows.length
+      const firstRow = obj.rows[0]
+      const sourceHeaders = Array.isArray(obj.headers)
+        ? obj.headers
+        : (Array.isArray(firstRow)
+            ? firstRow.map((_: unknown, i: number) => `列${i + 1}`)
+            : Object.keys(firstRow))
+      const headerDefs = normalizeHeaders(sourceHeaders)
+      tableHeaders.value = headerDefs.map(({ name }) => name)
+
+      // 全量数据存入非响应式数组（不创建 Vue Proxy，避免 15000+ 行卡死）
+      _allRowsRaw = obj.rows.map((row: unknown) => {
+        if (Array.isArray(row)) {
+          return Object.fromEntries(
+            headerDefs.map(({ name, index }) => [name, row[index] == null ? '' : String(row[index])])
+          )
+        }
+        const record = row as Record<string, unknown>
+        return Object.fromEntries(
+          Object.entries(record).map(([k, v]) => [k, v == null ? '' : String(v)])
+        )
+      })
+      totalRowCount.value = _allRowsRaw.length
+
+      // 仅将第一页放入响应式状态
+      loadPage(1)
+
+    } else if (obj.textPreview) {
+      String(obj.textPreview).split('\n').forEach((line: string) => {
+        const idx = line.includes('：') ? line.indexOf('：') : line.indexOf(':')
+        if (idx > 0 && idx < line.length - 1) {
+          const k = line.substring(0, idx).trim()
+          const v = line.substring(idx + 1).trim()
+          if (k && v) kvFields.value.push({ key: k, value: v })
+        }
+      })
+      activeTab.value = 'kv'
+    }
+  } catch {
+    activeTab.value = 'raw'
+  }
+}
+
+/**
+ * 将指定页的行深拷贝到 tableRows（响应式）。
+ * 深拷贝确保编辑不会直接污染 _allRowsRaw。
+ */
+function loadPage(page: number) {
+  const start = (page - 1) * PAGE_SIZE
+  const end   = Math.min(start + PAGE_SIZE, _allRowsRaw.length)
+  tableRows.value = _allRowsRaw.slice(start, end).map(r => ({ ...r }))
+}
+
+/**
+ * 将当前页编辑内容同步回非响应式存储。
+ * 在翻页、保存校正前必须调用。
+ */
+function syncCurrentPageToRaw() {
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  for (let i = 0; i < tableRows.value.length; i++) {
+    if (start + i < _allRowsRaw.length) {
+      _allRowsRaw[start + i] = { ...tableRows.value[i] }
+    }
+  }
+}
+
+function onPageChange(page: number) {
+  if (hasEdited.value) {
+    syncCurrentPageToRaw()   // 翻页前先保存当前页编辑
+  }
+  currentPage.value = page
+  loadPage(page)
+}
+
+watch(() => props.parsedData, initEditableData, { immediate: true, deep: false })
+
+onUnmounted(() => {
+  _allRowsRaw = []
+})
+
+// ── 操作 ───────────────────────────────────────────────────────────────────
+
+function markEdited() {
+  hasEdited.value = true
+  correctionSaved.value = false
+}
+
+function addRow() {
+  // 将空行添加到全量数据末尾，并跳转到最后一页
+  const emptyRow = Object.fromEntries(tableHeaders.value.map(h => [h, '']))
+  syncCurrentPageToRaw()
+  _allRowsRaw.push(emptyRow)
+  totalRowCount.value = _allRowsRaw.length
+  const lastPage = Math.ceil(totalRowCount.value / PAGE_SIZE)
+  currentPage.value = lastPage
+  loadPage(lastPage)
+  markEdited()
+}
+
+function deleteRow(index: number) {
+  // 从当前页 tableRows 移除，同步到全量
+  syncCurrentPageToRaw()
+  const globalIdx = pageStart.value + index
+  if (globalIdx < _allRowsRaw.length) {
+    _allRowsRaw.splice(globalIdx, 1)
+  }
+  totalRowCount.value = _allRowsRaw.length
+  loadPage(currentPage.value)
+  markEdited()
+}
 
 async function handleSaveCorrection() {
   if (!props.parsedData) return
+
+  // 先将当前页编辑同步到全量存储
+  syncCurrentPageToRaw()
+
   let correctedJson: string
   try {
     const base = JSON.parse(props.parsedData.correctedJson || props.parsedData.parsedJson || '{}')
-    if (tableRows.value.length > 0) {
-      base.headers = tableHeaders.value
-      base.rows = [...tableRows.value, ...allRows.value.slice(tableRows.value.length)]
+    if (_allRowsRaw.length > 0) {
+      base.headers   = tableHeaders.value
+      base.rows      = [..._allRowsRaw]   // 完整数据（非响应式副本）
+      base.totalRows = _allRowsRaw.length
     } else if (kvFields.value.length > 0) {
       base.textPreview = kvFields.value.map(kv => `${kv.key}：${kv.value}`).join('\n')
     }
@@ -299,6 +507,7 @@ async function handleSaveCorrection() {
     ElMessage.error('序列化校正数据失败，请刷新页面后重试')
     return
   }
+
   saving.value = true
   try {
     await saveCorrection(props.parsedData.id, correctedJson)
@@ -320,7 +529,8 @@ async function handleConfirm() {
   }
   try {
     await ElMessageBox.confirm(
-      `确认将当前解析结果写入正式「${props.parsedData.formType || '业务'}」数据库？`,
+      `确认将当前解析结果写入正式「${props.parsedData.formType || '业务'}」数据库？`
+      + (isLargeData.value ? `\n共 ${totalRowCount.value} 行，将分批写入，请耐心等待。` : ''),
       '确认写入',
       { confirmButtonText: '确认写入', cancelButtonText: '取消', type: 'warning' }
     )
@@ -334,11 +544,19 @@ async function handleConfirm() {
       businessTable: result.businessTable,
       confirmedIds: result.confirmedIds,
       confirmedCount: result.confirmedCount,
-      idempotent: result.idempotent
+      idempotent: result.idempotent,
+      totalRows: result.totalRows,
+      skippedRows: result.skippedRows ?? 0,
+      failedRows: result.failedRows ?? 0,
+      skippedMessages: result.skippedMessages ?? [],
+      failedMessages: result.failedMessages ?? []
     }
-    const suffix = result.idempotent ? '（已写入，本次幂等）' : '，写入成功'
+    const suffix = result.idempotent ? '（已写入，本次幂等）' : ''
     const tableHint = result.businessTable ? ` → ${result.businessTable}` : ''
-    ElMessage.success(`${result.formType}${tableHint} 共 ${result.confirmedCount} 条${suffix}`)
+    const totalHint = result.totalRows != null
+      ? `共解析 ${result.totalRows} 行，成功 ${result.confirmedCount} 行，跳过 ${result.skippedRows ?? 0} 行，失败 ${result.failedRows ?? 0} 行`
+      : `共 ${result.confirmedCount} 条`
+    ElMessage.success(`${result.formType}${tableHint}：${totalHint}${suffix}`)
     emit('confirmed', {
       formType: result.formType,
       businessTable: result.businessTable,
@@ -346,7 +564,9 @@ async function handleConfirm() {
       confirmedCount: result.confirmedCount
     })
   } catch (err: unknown) {
-    ElMessage.error(err instanceof Error ? err.message : '确认写入失败，请稍后重试')
+    // 后端返回的错误信息包含行号和字段原因，直接展示
+    const msg = err instanceof Error ? err.message : '确认写入失败，请稍后重试'
+    ElMessage.error(msg)
   } finally {
     confirming.value = false
   }
@@ -357,8 +577,9 @@ async function handleConfirm() {
 .parsed-panel { margin-top: 16px; }
 .confirm-area { min-height: 36px; }
 .action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.table-wrapper { overflow-x: auto; max-height: 500px; overflow-y: auto; }
+.table-wrapper { overflow-x: auto; max-height: 560px; overflow-y: auto; }
 .correction-table { width: 100%; }
+.pagination-bar { display: flex; justify-content: flex-end; }
 .json-view {
   max-height: 400px; margin: 0; padding: 12px; overflow: auto;
   background: var(--el-fill-color-light); border: 1px solid var(--el-border-color-light);
@@ -367,8 +588,13 @@ async function handleConfirm() {
 }
 .mono-text { font-family: monospace; font-size: 12px; }
 .block { display: block; }
-.mb-8px { margin-bottom: 8px; }
-.ml-8px { margin-left: 8px; }
-.mt-12px { margin-top: 12px; }
+.mb-8px  { margin-bottom: 8px; }
 .mt-8px  { margin-top: 8px; }
+.mt-12px { margin-top: 12px; }
+.ml-8px  { margin-left: 8px; }
+.detail-collapse { border: none; }
+.detail-list { margin: 4px 0; padding-left: 16px; font-size: 12px; line-height: 1.8; }
+.skipped-item { color: var(--el-color-info); }
+.failed-item  { color: var(--el-color-danger); }
+.more-hint    { color: var(--el-color-info-light-3); font-style: italic; }
 </style>

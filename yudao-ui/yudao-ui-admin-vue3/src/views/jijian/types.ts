@@ -44,6 +44,16 @@ export interface ConfirmWriteResult {
   confirmedIds: number[]
   confirmedCount: number
   idempotent: boolean
+  /** 原始解析总行数 */
+  totalRows?: number
+  /** 跳过行数（空白行/合计行） */
+  skippedRows?: number
+  /** 失败行数（有业务字段但关键字段缺失或解析异常） */
+  failedRows?: number
+  /** 跳过行原因列表（最多 20 条） */
+  skippedMessages?: string[]
+  /** 失败行原因列表（最多 20 条） */
+  failedMessages?: string[]
 }
 
 export interface QueryHistoryItem {
