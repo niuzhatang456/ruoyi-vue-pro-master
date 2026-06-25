@@ -64,6 +64,12 @@ public class PaddleOcrServiceImpl implements OcrService {
     @Override
     public OcrResult recognize(byte[] fileBytes, String fileName) {
         JijianProperties.Ocr ocrCfg = jijianProperties.getOcr();
+        return recognize(fileBytes, fileName, ocrCfg.getMaxPdfPages());
+    }
+
+    @Override
+    public OcrResult recognize(byte[] fileBytes, String fileName, int maxPdfPages) {
+        JijianProperties.Ocr ocrCfg = jijianProperties.getOcr();
         String endpoint     = ocrCfg.getEndpoint();
         int    timeoutSecs  = ocrCfg.getTimeoutSeconds();
 
@@ -74,7 +80,7 @@ public class PaddleOcrServiceImpl implements OcrService {
         try {
             // 构造 multipart/form-data 请求体
             String boundary = "jijianocr" + UUID.randomUUID().toString().replace("-", "");
-            byte[] body = buildMultipart(boundary, fileBytes, fileName);
+            byte[] body = buildMultipart(boundary, fileBytes, fileName, maxPdfPages);
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(endpoint))
@@ -125,9 +131,13 @@ public class PaddleOcrServiceImpl implements OcrService {
 
     // ── multipart 构造 ────────────────────────────────────────────────────────
 
-    private byte[] buildMultipart(String boundary, byte[] fileBytes, String fileName) throws Exception {
+    private byte[] buildMultipart(String boundary, byte[] fileBytes, String fileName, int maxPdfPages) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         String sep = "--" + boundary + "\r\n";
+        out.write(sep.getBytes(StandardCharsets.UTF_8));
+        out.write("Content-Disposition: form-data; name=\"max_pdf_pages\"\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        out.write(String.valueOf(Math.max(0, maxPdfPages)).getBytes(StandardCharsets.UTF_8));
+        out.write("\r\n".getBytes(StandardCharsets.UTF_8));
         // file 字段
         out.write(sep.getBytes(StandardCharsets.UTF_8));
         out.write(("Content-Disposition: form-data; name=\"file\"; filename=\"" +
@@ -142,7 +152,18 @@ public class PaddleOcrServiceImpl implements OcrService {
 
     /** 去除文件名中可能破坏 Content-Disposition 头的字符 */
     private String sanitizeFileName(String name) {
-        return (name == null ? "upload" : name).replaceAll("[\"\\\\]", "_");
+        String original = name == null ? "upload" : name;
+        int dotIndex = original.lastIndexOf('.');
+        String base = dotIndex > 0 ? original.substring(0, dotIndex) : original;
+        String ext = dotIndex > 0 ? original.substring(dotIndex) : "";
+        base = base.replaceAll("[^A-Za-z0-9._-]+", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^_+|_+$", "");
+        ext = ext.replaceAll("[^A-Za-z0-9.]", "");
+        if (StrUtil.isBlank(base)) {
+            base = "upload";
+        }
+        return StrUtil.maxLength(base, 80) + ext;
     }
 
     // ── 结果转换 ──────────────────────────────────────────────────────────────

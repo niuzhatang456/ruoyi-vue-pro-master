@@ -16,4 +16,13 @@ public interface OcrService {
      * @return OCR 识别结果；success=false 时 errorMessage 包含可读错误
      */
     OcrResult recognize(byte[] fileBytes, String fileName);
+
+    /**
+     * Recognize a file with an explicit PDF page limit.
+     *
+     * @param maxPdfPages max PDF pages to OCR; 0 means all pages
+     */
+    default OcrResult recognize(byte[] fileBytes, String fileName, int maxPdfPages) {
+        return recognize(fileBytes, fileName);
+    }
 }

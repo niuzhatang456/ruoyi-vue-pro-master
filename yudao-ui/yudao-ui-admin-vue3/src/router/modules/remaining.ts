@@ -53,7 +53,7 @@ const remainingRouter: AppRouteRecordRaw[] = [
   {
     path: '/',
     component: Layout,
-    redirect: '/input/ocr',
+    redirect: '/input/drag',
     name: 'Home',
     meta: {
       hidden: true
@@ -80,11 +80,16 @@ const remainingRouter: AppRouteRecordRaw[] = [
     meta: {
       title: '录入数据',
       icon: 'ep:upload',
-      alwaysShow: true,
-      hidden: true
+      alwaysShow: true
     },
     children: [
       // ─── 分组入口（侧边栏可见）───────────────────────────────────────────
+      {
+        path: 'drag',
+        component: () => import('@/views/jijian/input/Drag.vue'),
+        name: 'JijianInputDrag',
+        meta: { title: '拖拽录入', icon: 'ep:folder-add' }
+      },
       {
         path: 'property-group',
         component: () => import('@/views/jijian/input/PropertyGroup.vue'),
@@ -102,12 +107,6 @@ const remainingRouter: AppRouteRecordRaw[] = [
         component: () => import('@/views/jijian/input/CanteenSupplier.vue'),
         name: 'JijianInputCanteenSupplier',
         meta: { title: '食堂供应', icon: 'ep:food' }
-      },
-      {
-        path: 'drag',
-        component: () => import('@/views/jijian/input/Drag.vue'),
-        name: 'JijianInputDrag',
-        meta: { title: '拖拽录入', icon: 'ep:folder-add' }
       },
       // ─── 旧单表入口（保留路由可访问，但隐藏侧边栏）────────────────────────
       {
@@ -180,8 +179,7 @@ const remainingRouter: AppRouteRecordRaw[] = [
     meta: {
       title: '查询信息',
       icon: 'ep:search',
-      alwaysShow: true,
-      hidden: true
+      alwaysShow: true
     },
     children: [
       {
@@ -203,8 +201,7 @@ const remainingRouter: AppRouteRecordRaw[] = [
     meta: {
       title: '我的',
       icon: 'ep:user',
-      alwaysShow: true,
-      hidden: true
+      alwaysShow: true
     },
     children: [
       {

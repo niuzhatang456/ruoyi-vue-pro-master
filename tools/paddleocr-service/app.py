@@ -20,7 +20,7 @@ import traceback
 from typing import List, Dict, Any
 
 import numpy as np
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
 
@@ -174,7 +174,7 @@ def ocr_image_bytes(img_bytes: bytes) -> dict:
         return err(f"图片解码失败：{e}")
 
 
-def ocr_pdf_bytes(pdf_bytes: bytes) -> dict:
+def ocr_pdf_bytes(pdf_bytes: bytes, max_pdf_pages: int = MAX_PDF_PAGES) -> dict:
     if not HAS_FITZ:
         return err("PDF 识别需要 PyMuPDF，请执行：pip install PyMuPDF")
 
@@ -184,7 +184,8 @@ def ocr_pdf_bytes(pdf_bytes: bytes) -> dict:
         return err(f"PDF 打开失败：{e}")
 
     total = len(doc)
-    to_process = min(total, MAX_PDF_PAGES)
+    page_limit = int(max_pdf_pages or 0)
+    to_process = total if page_limit <= 0 else min(total, page_limit)
     all_lines, all_tables, all_texts = [], [], []
 
     for i in range(to_process):
@@ -203,7 +204,9 @@ def ocr_pdf_bytes(pdf_bytes: bytes) -> dict:
     if not all_lines:
         return err("PDF 中未识别到有效文字，请确认文件为扫描件且清晰度足够")
 
-    notice = f"PDF 共 {total} 页，已识别前 {to_process} 页" if total > MAX_PDF_PAGES else ""
+    notice = (f"PDF total {total} pages, recognized all {to_process} pages"
+              if to_process >= total else
+              f"PDF total {total} pages, recognized first {to_process} pages")
     return ok("\n".join(all_texts), all_lines, all_tables, notice)
 
 
@@ -377,7 +380,7 @@ async def health():
 
 
 @app.post("/ocr")
-async def do_ocr(file: UploadFile = File(...)):
+async def do_ocr(file: UploadFile = File(...), max_pdf_pages: int = Form(MAX_PDF_PAGES)):
     if file is None:
         return JSONResponse(err("未收到文件"))
 
@@ -389,7 +392,7 @@ async def do_ocr(file: UploadFile = File(...)):
 
     try:
         if fname.endswith(".pdf"):
-            result = ocr_pdf_bytes(content)
+            result = ocr_pdf_bytes(content, max_pdf_pages)
         elif any(fname.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"]):
             result = ocr_image_bytes(content)
         else:

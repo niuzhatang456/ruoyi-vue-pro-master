@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.jijian.service.parseddata;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
+import cn.iocoder.yudao.module.infra.api.file.FileApi;
 import cn.iocoder.yudao.module.jijian.dal.dataobject.importrecord.ImportRecordDO;
 import cn.iocoder.yudao.module.jijian.dal.dataobject.parseddata.ParsedDataDO;
 import cn.iocoder.yudao.module.jijian.dal.mysql.importrecord.ImportRecordMapper;
@@ -70,6 +71,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
     /** rawText 中首行示例展示字段数 */
     private static final int DETECT_SAMPLE_COLS = 3;
     private static final int OCR_HEADER_SCAN_LIMIT = 10;
+    private static final int OCR_ALL_PDF_PAGES = 0;
     private static final long MAX_UPLOAD_BYTES = 20L * 1024 * 1024;
     private static final Set<String> ALLOWED_UPLOAD_EXTENSIONS = new HashSet<>(
             Arrays.asList("xls", "xlsx", "csv", "jpg", "jpeg", "png", "pdf"));
@@ -107,6 +109,8 @@ public class ParsedDataServiceImpl implements ParsedDataService {
     @Resource private JijianProperties            jijianProperties;
     @Resource private OcrService                  ocrService;
     @Resource private JdbcTemplate                jdbcTemplate;
+    @Resource private FileApi                     fileApi;
+    @Resource private LeaseContractParseService   leaseContractParseService;
 
     // ==================== 上传解析入口 ====================
 
@@ -116,18 +120,20 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             validateUploadFile(file);
             String fname = StrUtil.blankToDefault(file.getOriginalFilename(), "").toLowerCase(Locale.ROOT);
             ParsedPayload payload;
+            String formType;
 
-            if (isExcel(fname)) {
-                payload = parseExcel(file);
-            } else if (isCsv(fname)) {
-                payload = parseCsv(file);
-            } else if (isImageOrPdf(fname)) {
-                payload = parseImageOrPdf(file, fname);
+            if (shouldUseLeaseContractParser(fname, null, importRecord)) {
+                payload = parseLeaseContract(file, fname);
+                formType = FormTypeConstants.LEASE_CONTRACT;
             } else {
-                payload = parseTextFile(file);
+                payload = parseGenericPayload(file, fname);
+                formType = detectFormType(payload.detectText);
+                if (shouldUseLeaseContractParser(fname, payload.detectText, importRecord)) {
+                    payload = parseLeaseContract(file, fname);
+                    formType = FormTypeConstants.LEASE_CONTRACT;
+                }
             }
 
-            String formType = detectFormType(payload.detectText);
             if (FormTypeConstants.ATTENDANCE.equals(formType)) {
                 normalizeAttendanceHeaders(payload.parsedData);
             }
@@ -165,16 +171,9 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         try {
             validateUploadFile(file);
             String fname = StrUtil.blankToDefault(file.getOriginalFilename(), "").toLowerCase(Locale.ROOT);
-            ParsedPayload payload;
-            if (isExcel(fname)) {
-                payload = parseExcel(file);
-            } else if (isCsv(fname)) {
-                payload = parseCsv(file);
-            } else if (isImageOrPdf(fname)) {
-                payload = parseImageOrPdf(file, fname);
-            } else {
-                payload = parseTextFile(file);
-            }
+            ParsedPayload payload = FormTypeConstants.LEASE_CONTRACT.equals(forcedFormType)
+                    ? parseLeaseContract(file, fname)
+                    : parseGenericPayload(file, fname);
 
             if (FormTypeConstants.ATTENDANCE.equals(forcedFormType)) {
                 normalizeAttendanceHeaders(payload.parsedData);
@@ -199,6 +198,19 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             return createFailedParsedData(importRecord,
                     StrUtil.blankToDefault(ex.getMessage(), "文件解析失败，请检查文件格式"));
         }
+    }
+
+    private ParsedPayload parseGenericPayload(MultipartFile file, String fname) throws Exception {
+        if (isExcel(fname)) {
+            return parseExcel(file);
+        }
+        if (isCsv(fname)) {
+            return parseCsv(file);
+        }
+        if (isImageOrPdf(fname)) {
+            return parseImageOrPdf(file, fname);
+        }
+        return parseTextFile(file);
     }
 
     private void validateUploadFile(MultipartFile file) throws Exception {
@@ -906,6 +918,62 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         }
     }
 
+    // ==================== 租赁合同 OCR / 文本解析 ====================
+
+    private ParsedPayload parseLeaseContract(MultipartFile file, String fname) throws Exception {
+        String fileName = StrUtil.blankToDefault(file.getOriginalFilename(), "未命名文件");
+        byte[] fileBytes = file.getBytes();
+        String contractText;
+
+        if (isImageOrPdf(fname)) {
+            if (!jijianProperties.getOcr().isEnabled()) {
+                throw exception(OCR_SERVICE_NOT_ENABLED);
+            }
+            OcrResult ocrResult = ocrService.recognize(fileBytes, fileName, OCR_ALL_PDF_PAGES);
+            if (!ocrResult.isSuccess()) {
+                throw exception(OCR_RECOGNITION_FAILED);
+            }
+            contractText = ocrResult.getFullText();
+        } else if (isExcel(fname)) {
+            ParsedPayload excelPayload = parseExcel(file);
+            contractText = StrUtil.blankToDefault((String) excelPayload.parsedData.get("_fullScanText"),
+                    excelPayload.detectText);
+        } else {
+            contractText = decodeBytes(fileBytes);
+        }
+
+        String originalFileUrl;
+        try {
+            originalFileUrl = fileApi.createFile(fileBytes, fileName,
+                    "jijian/lease-contract", file.getContentType());
+        } catch (Exception ex) {
+            log.warn("[parseLeaseContract] archive original file failed, fallback to logical path. fileName={}, error={}",
+                    fileName, ex.getMessage());
+            originalFileUrl = "jijian/lease-contract/" + fileName;
+        }
+        LeaseContractParseService.ParseResult result = leaseContractParseService.parse(
+                fileName, contractText, originalFileUrl, originalFileUrl);
+
+        List<Map<String, String>> rows = Collections.singletonList(result.getRow());
+        Map<String, Object> parsed = buildParsedMap(fileName, "租赁合同识别",
+                result.getHeaders(), rows, rows.size());
+        parsed.put("formType", FormTypeConstants.LEASE_CONTRACT);
+        parsed.put("ocrText", StrUtil.maxLength(contractText, 1000));
+        parsed.put("scanText", StrUtil.maxLength(contractText, 4000));
+        parsed.put("originalFileName", fileName);
+        parsed.put("originalFileUrl", originalFileUrl);
+        parsed.put("originalFilePath", originalFileUrl);
+        parsed.put("parseStatus", result.getParseStatus());
+        parsed.put("parseErrorMsg", result.getParseErrorMsg());
+        parsed.put("rentInfoJson", result.getRow().get("租金明细JSON"));
+
+        String rawText = "文件：" + fileName + " | 来源：租赁合同识别 | 表头："
+                + String.join("，", result.getHeaders())
+                + " | OCR原文：" + StrUtil.maxLength(contractText, 1000);
+        String detectText = fileName + " " + String.join(" ", result.getHeaders()) + " " + contractText;
+        return new ParsedPayload(rawText, detectText, parsed);
+    }
+
     // ==================== 文件类型判断 ====================
 
     private boolean isExcel(String fn) {
@@ -922,13 +990,44 @@ public class ParsedDataServiceImpl implements ParsedDataService {
                 || fn.endsWith(".pdf");
     }
 
+    private boolean shouldUseLeaseContractParser(String fname, String text, ImportRecordDO importRecord) {
+        String detectedFormType = importRecord != null ? importRecord.getDetectedFormType() : null;
+        if (FormTypeConstants.LEASE_CONTRACT.equals(detectedFormType) || "合同管理".equals(detectedFormType)) {
+            return true;
+        }
+        if (isLikelyLeaseContractFile(fname)) {
+            return true;
+        }
+        if (StrUtil.isBlank(text)) {
+            return false;
+        }
+        return containsAny(text, "房屋租赁合同", "租赁合同", "出租合同", "综合楼出租")
+                || (containsAny(text, "出租方", "甲方")
+                && containsAny(text, "承租方", "乙方")
+                && containsAny(text, "租赁期限", "租赁期", "房屋租金", "保证金"));
+    }
+
+    private boolean isLikelyLeaseContractFile(String fn) {
+        return StrUtil.isNotBlank(fn) && (fn.contains("租赁合同")
+                || fn.contains("房屋租赁")
+                || fn.contains("租房合同")
+                || fn.contains("出租合同")
+                || fn.contains("出租")
+                || fn.contains("合同")
+                || fn.contains("lease-contract")
+                || fn.contains("lease_contract"));
+    }
+
     // ==================== 表单类型识别 ====================
 
     private String detectFormType(String text) {
         if (StrUtil.isBlank(text)) return null;
         String c = text;
         if (containsAny(c, "营业执照", "是否内部人员", "身份证号", "联系电话")) return FormTypeConstants.LESSEE;
-        if (containsAny(c, "合同内容摘要", "租金", "水电费管理", "支付情况", "合同编号")) return FormTypeConstants.LEASE_CONTRACT;
+        if (containsAny(c, "合同内容摘要", "租金", "水电费管理", "支付情况", "合同编号",
+                "合同管理", "房屋租赁合同", "出租合同", "出租方", "承租方", "租赁期限", "房屋租金")) {
+            return FormTypeConstants.LEASE_CONTRACT;
+        }
         if (containsAny(c, "疗养假", "疗休养", "休假地点", "参加工作时间", "工作年限")) return FormTypeConstants.LEAVE_HEALTH;
         if (containsAny(c, "调休", "加班开始", "调休开始", "调休时长", "补休")) return FormTypeConstants.COMPENSATORY;
         if (containsAny(c, "出差", "出差事由", "出差类型", "出差开始")) return FormTypeConstants.BUSINESS_TRIP;

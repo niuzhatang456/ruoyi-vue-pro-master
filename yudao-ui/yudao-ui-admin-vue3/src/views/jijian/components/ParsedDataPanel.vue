@@ -51,7 +51,7 @@
                 ：共解析 <strong>{{ localResult.totalRows }}</strong> 行，
                 成功 <strong>{{ localResult.confirmedCount }}</strong> 行，
                 跳过 <strong>{{ localResult.skippedRows ?? 0 }}</strong> 行，
-                失败 <strong>{{ localResult.failedRows ?? 0 }}</strong> 行
+                失败 <strong>{{ localResult.failedRows ?? 0 }}</strong> 行<template v-if="(localResult.duplicateSkippedCount ?? 0) > 0">，跳过重复 <strong>{{ localResult.duplicateSkippedCount }}</strong> 条</template>
               </template>
               <template v-else>
                 ，共 {{ confirmedCount }} 条记录
@@ -122,9 +122,52 @@
 
     <!-- ── 数据展示 / 编辑 ── -->
     <el-tabs class="mt-12px" v-model="activeTab">
+      <!-- 租赁合同纵向预览 -->
+      <el-tab-pane v-if="isLeaseContractPreview" label="租赁合同预览" name="lease">
+        <div class="lease-preview">
+          <el-form label-position="top" size="small" class="lease-form">
+            <el-form-item v-for="field in leaseFields" :key="field.key" :label="field.label">
+              <el-input
+                v-if="canConfirm"
+                v-model="field.value"
+                :type="field.multiline ? 'textarea' : 'text'"
+                :autosize="field.multiline ? { minRows: 2, maxRows: 5 } : undefined"
+                @change="markEdited"
+              />
+              <span v-else class="lease-readonly">{{ field.value || '-' }}</span>
+            </el-form-item>
+          </el-form>
+
+          <div class="rent-section">
+            <div class="rent-section-header">
+              <span>租金与交纳日期明细</span>
+              <el-button v-if="canConfirm" size="small" plain @click="addLeaseRentItem">
+                <el-icon><Plus /></el-icon> 新增明细
+              </el-button>
+            </div>
+            <div v-if="leaseRentItems.length === 0" class="empty-rent">暂无租金明细</div>
+            <div v-for="(item, index) in leaseRentItems" :key="item.index" class="rent-item">
+              <div class="rent-title">第 {{ index + 1 }} 项</div>
+              <div class="rent-grid">
+                <label>租赁年份</label>
+                <el-input v-if="canConfirm" v-model="item.year" size="small" @change="markEdited" />
+                <span v-else>{{ item.year || '-' }}</span>
+                <label>租金交纳日期</label>
+                <el-input v-if="canConfirm" v-model="item.paymentDate" size="small" @change="markEdited" />
+                <span v-else>{{ item.paymentDate || '-' }}</span>
+                <label>房屋租金</label>
+                <el-input v-if="canConfirm" v-model="item.rentAmount" size="small" @change="markEdited" />
+                <span v-else>{{ item.rentAmount || '-' }}</span>
+              </div>
+              <el-button v-if="canConfirm" type="danger" size="small" link @click="deleteLeaseRentItem(index)">删除</el-button>
+            </div>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <!-- 多行表格 -->
       <el-tab-pane
-        v-if="tableHeaders.length > 0"
+        v-if="tableHeaders.length > 0 && !isLeaseContractPreview"
         :label="`数据表格（${totalRowCount} 行${isLargeData ? '，分页预览' : ''}）`"
         name="table"
       >
@@ -147,11 +190,20 @@
               :key="header"
               :prop="header"
               :label="header"
-              min-width="130"
+              :min-width="getColumnMinWidth(header)"
             >
               <template #default="{ row }">
-                <el-input v-if="canConfirm" v-model="row[header]" size="small" @change="markEdited" />
-                <span v-else>{{ row[header] ?? '' }}</span>
+                <el-input
+                  v-if="canConfirm"
+                  v-model="row[header]"
+                  type="textarea"
+                  :autosize="{ minRows: 1, maxRows: 4 }"
+                  resize="none"
+                  class="cell-editor"
+                  size="small"
+                  @change="markEdited"
+                />
+                <span v-else class="cell-text">{{ row[header] ?? '' }}</span>
               </template>
             </el-table-column>
             <el-table-column v-if="canConfirm" label="操作" width="70" fixed="right">
@@ -207,6 +259,20 @@ import { Plus } from '@element-plus/icons-vue'
 import { confirmWrite, saveCorrection } from '@/api/jijian/import'
 import type { ParsedData } from '../types'
 
+type LeaseField = {
+  key: string
+  label: string
+  value: string
+  multiline?: boolean
+}
+
+type LeaseRentItem = {
+  index: number
+  year: string
+  paymentDate: string
+  rentAmount: string
+}
+
 // ── 常量 ────────────────────────────────────────────────────────────────────
 /** 每页展示行数（Vue 响应式对象上限）。超过此值时启用分页预览。 */
 const PAGE_SIZE = 200
@@ -246,17 +312,33 @@ const localResult     = ref<{
   failedRows?: number
   skippedMessages?: string[]
   failedMessages?: string[]
+  duplicateSkippedCount?: number
+  duplicateSkippedRows?: string[]
 } | null>(null)
 
 const tableHeaders  = ref<string[]>([])
 /** 当前页的行数据（已深拷贝，可安全 v-model 编辑） */
 const tableRows     = ref<Record<string, string>[]>([])
 const kvFields      = ref<{ key: string; value: string }[]>([])
+const leaseFields   = ref<LeaseField[]>([])
+const leaseRentItems = ref<LeaseRentItem[]>([])
 const totalRowCount = ref(0)
 const currentPage   = ref(1)
 
 // ── 计算属性 ────────────────────────────────────────────────────────────────
 const isLargeData  = computed(() => totalRowCount.value > LARGE_DATA_THRESHOLD)
+
+const isLeaseContractPreview = computed(() => {
+  if (props.parsedData?.formType === '租赁合同' || props.parsedData?.businessTable === 'jijian_lease_contract') {
+    return true
+  }
+  const source = props.parsedData?.correctedJson || props.parsedData?.parsedJson
+  if (!source) return false
+  try {
+    const obj = JSON.parse(source)
+    return obj.formType === '租赁合同' || obj.businessTable === 'jijian_lease_contract'
+  } catch { return false }
+})
 
 /** 读取 parsedJson 中的 ocrNotice 字段，用于展示非阻断提示（如食堂日期未识别） */
 const parsedNotice = computed<string>(() => {
@@ -361,6 +443,8 @@ function initEditableData() {
   tableHeaders.value  = []
   tableRows.value     = []
   kvFields.value      = []
+  leaseFields.value   = []
+  leaseRentItems.value = []
   totalRowCount.value = 0
   hasEdited.value     = false
   correctionSaved.value = false
@@ -401,6 +485,9 @@ function initEditableData() {
 
       // 仅将第一页放入响应式状态
       loadPage(1)
+      if (isLeaseContractPreview.value) {
+        initLeaseContractEditor(obj)
+      }
 
     } else if (obj.textPreview) {
       String(obj.textPreview).split('\n').forEach((line: string) => {
@@ -413,9 +500,108 @@ function initEditableData() {
       })
       activeTab.value = 'kv'
     }
+    if (isLeaseContractPreview.value) {
+      activeTab.value = 'lease'
+    }
   } catch {
     activeTab.value = 'raw'
   }
+}
+
+function initLeaseContractEditor(parsedObj: Record<string, any>) {
+  const row = _allRowsRaw[0] || {}
+  const fields: Array<Omit<LeaseField, 'value'>> = [
+    { key: '合同编号', label: '合同编号' },
+    { key: '合同签订日期', label: '合同签订日期' },
+    { key: '出租方', label: '出租方' },
+    { key: '承租方', label: '承租方' },
+    { key: '承租人身份证号', label: '承租人身份证号' },
+    { key: '承租人联系电话', label: '承租人联系电话' },
+    { key: '房屋状况', label: '房屋状况', multiline: true },
+    { key: '租赁开始时间', label: '租赁开始时间' },
+    { key: '租赁结束时间', label: '租赁结束时间' },
+    { key: '租赁年份', label: '租赁年份' },
+    { key: '租赁用途', label: '租赁用途' },
+    { key: '保证金', label: '保证金' },
+    { key: '水费', label: '水费' },
+    { key: '电费', label: '电费' },
+    { key: '备注', label: '备注', multiline: true }
+  ]
+  leaseFields.value = fields.map(field => ({
+    ...field,
+    value: row[field.key] || ''
+  }))
+  leaseRentItems.value = parseLeaseRentItems(row, parsedObj)
+}
+
+function parseLeaseRentItems(row: Record<string, string>, parsedObj: Record<string, any>): LeaseRentItem[] {
+  const json = row['租金明细JSON'] || row.rentInfoJson || parsedObj.rentInfoJson
+  if (json) {
+    try {
+      const arr = typeof json === 'string' ? JSON.parse(json) : json
+      if (Array.isArray(arr)) {
+        return arr.map((item, idx) => ({
+          index: Number(item.index || idx + 1),
+          year: item.year == null ? '' : String(item.year),
+          paymentDate: item.paymentDate == null ? String(item.paymentText || '') : String(item.paymentDate),
+          rentAmount: item.rentAmount == null ? String(item.rentText || '') : String(item.rentAmount)
+        })).filter(item => item.year || item.paymentDate || item.rentAmount)
+      }
+    } catch {}
+  }
+  const items: LeaseRentItem[] = []
+  for (let i = 1; i <= 50; i++) {
+    const rentAmount = row[`房屋租金${i}`] || ''
+    const paymentDate = row[`租金交纳日期${i}`] || ''
+    if (!rentAmount && !paymentDate) continue
+    const year = ((rentAmount + ' ' + paymentDate).match(/20\d{2}/)?.[0]) || ''
+    items.push({ index: items.length + 1, year, paymentDate, rentAmount })
+  }
+  return items
+}
+
+function syncLeaseContractToRows(base?: Record<string, any>) {
+  if (!isLeaseContractPreview.value || _allRowsRaw.length === 0) return
+  const row = { ..._allRowsRaw[0] }
+  for (const field of leaseFields.value) {
+    row[field.key] = field.value || ''
+  }
+  const rentItems = leaseRentItems.value
+    .map((item, idx) => ({
+      index: idx + 1,
+      year: item.year || '',
+      paymentDate: item.paymentDate || '',
+      rentAmount: item.rentAmount || ''
+    }))
+    .filter(item => item.year || item.paymentDate || item.rentAmount)
+  row['租金明细JSON'] = JSON.stringify(rentItems)
+  for (let i = 1; i <= 50; i++) {
+    delete row[`房屋租金${i}`]
+    delete row[`租金交纳日期${i}`]
+  }
+  rentItems.forEach((item, idx) => {
+    row[`房屋租金${idx + 1}`] = item.rentAmount
+    row[`租金交纳日期${idx + 1}`] = item.paymentDate
+  })
+  _allRowsRaw[0] = row
+  tableRows.value = [{ ...row }]
+  tableHeaders.value = buildLeaseHeaders(rentItems.length)
+  if (base) {
+    base.headers = tableHeaders.value
+    base.rentInfoJson = row['租金明细JSON']
+  }
+}
+
+function buildLeaseHeaders(rentCount: number): string[] {
+  const headers = [
+    '合同编号', '合同签订日期', '出租方', '承租方', '承租人身份证号', '承租人联系电话',
+    '房屋状况', '租赁开始时间', '租赁结束时间', '租赁年份', '租赁用途'
+  ]
+  for (let i = 1; i <= Math.max(rentCount, 1); i++) {
+    headers.push(`房屋租金${i}`, `租金交纳日期${i}`)
+  }
+  headers.push('保证金', '水费', '电费', '备注')
+  return headers
 }
 
 /**
@@ -449,6 +635,14 @@ function onPageChange(page: number) {
   loadPage(page)
 }
 
+function getColumnMinWidth(header: string) {
+  if (/房屋租金|租金交纳日期/.test(header)) return 300
+  if (/房屋状况|备注|原始|OCR/.test(header)) return 360
+  if (/出租方|承租方/.test(header)) return 220
+  if (/合同编号|日期|时间|电话|身份证/.test(header)) return 180
+  return 140
+}
+
 watch(() => props.parsedData, initEditableData, { immediate: true, deep: false })
 
 onUnmounted(() => {
@@ -460,6 +654,22 @@ onUnmounted(() => {
 function markEdited() {
   hasEdited.value = true
   correctionSaved.value = false
+}
+
+function addLeaseRentItem() {
+  leaseRentItems.value.push({
+    index: leaseRentItems.value.length + 1,
+    year: '',
+    paymentDate: '',
+    rentAmount: ''
+  })
+  markEdited()
+}
+
+function deleteLeaseRentItem(index: number) {
+  leaseRentItems.value.splice(index, 1)
+  leaseRentItems.value.forEach((item, idx) => { item.index = idx + 1 })
+  markEdited()
 }
 
 function addRow() {
@@ -495,6 +705,9 @@ async function handleSaveCorrection() {
   let correctedJson: string
   try {
     const base = JSON.parse(props.parsedData.correctedJson || props.parsedData.parsedJson || '{}')
+    if (isLeaseContractPreview.value) {
+      syncLeaseContractToRows(base)
+    }
     if (_allRowsRaw.length > 0) {
       base.headers   = tableHeaders.value
       base.rows      = [..._allRowsRaw]   // 完整数据（非响应式副本）
@@ -539,6 +752,10 @@ async function handleConfirm() {
   confirming.value = true
   try {
     const result = await confirmWrite(props.parsedData.id)
+    const extendedResult = result as typeof result & {
+      duplicateSkippedCount?: number
+      duplicateSkippedRows?: string[]
+    }
     localResult.value = {
       formType: result.formType,
       businessTable: result.businessTable,
@@ -549,13 +766,16 @@ async function handleConfirm() {
       skippedRows: result.skippedRows ?? 0,
       failedRows: result.failedRows ?? 0,
       skippedMessages: result.skippedMessages ?? [],
-      failedMessages: result.failedMessages ?? []
+      failedMessages: result.failedMessages ?? [],
+      duplicateSkippedCount: extendedResult.duplicateSkippedCount ?? 0,
+      duplicateSkippedRows: extendedResult.duplicateSkippedRows ?? []
     }
     const suffix = result.idempotent ? '（已写入，本次幂等）' : ''
     const tableHint = result.businessTable ? ` → ${result.businessTable}` : ''
+    const dupHint = (extendedResult.duplicateSkippedCount ?? 0) > 0 ? `，跳过重复 ${extendedResult.duplicateSkippedCount} 条` : ''
     const totalHint = result.totalRows != null
-      ? `共解析 ${result.totalRows} 行，成功 ${result.confirmedCount} 行，跳过 ${result.skippedRows ?? 0} 行，失败 ${result.failedRows ?? 0} 行`
-      : `共 ${result.confirmedCount} 条`
+      ? `共解析 ${result.totalRows} 行，成功 ${result.confirmedCount} 行，跳过 ${result.skippedRows ?? 0} 行，失败 ${result.failedRows ?? 0} 行${dupHint}`
+      : `共 ${result.confirmedCount} 条${dupHint}`
     ElMessage.success(`${result.formType}${tableHint}：${totalHint}${suffix}`)
     emit('confirmed', {
       formType: result.formType,
@@ -575,10 +795,89 @@ async function handleConfirm() {
 
 <style scoped>
 .parsed-panel { margin-top: 16px; }
+:global(.jijian-parsed-preview-dialog .el-dialog__body) {
+  max-height: 82vh;
+  overflow: auto;
+}
 .confirm-area { min-height: 36px; }
 .action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.table-wrapper { overflow-x: auto; max-height: 560px; overflow-y: auto; }
+.table-wrapper { overflow-x: auto; max-height: 78vh; overflow-y: auto; }
 .correction-table { width: 100%; }
+.correction-table :deep(.cell) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.45;
+}
+.cell-editor :deep(.el-textarea__inner) {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+.cell-text {
+  display: inline-block;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.lease-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.lease-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+.lease-form :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+.lease-form :deep(.el-form-item:nth-child(7)),
+.lease-form :deep(.el-form-item:nth-child(15)) {
+  grid-column: 1 / -1;
+}
+.lease-readonly {
+  min-height: 24px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.rent-section {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
+  padding: 12px;
+}
+.rent-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.empty-rent {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+.rent-item {
+  border-top: 1px solid var(--el-border-color-lighter);
+  padding: 10px 0;
+}
+.rent-item:first-of-type {
+  border-top: 0;
+}
+.rent-title {
+  margin-bottom: 8px;
+  color: var(--el-text-color-regular);
+  font-weight: 600;
+}
+.rent-grid {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+}
+.rent-grid label {
+  color: var(--el-text-color-secondary);
+}
 .pagination-bar { display: flex; justify-content: flex-end; }
 .json-view {
   max-height: 400px; margin: 0; padding: 12px; overflow: auto;
