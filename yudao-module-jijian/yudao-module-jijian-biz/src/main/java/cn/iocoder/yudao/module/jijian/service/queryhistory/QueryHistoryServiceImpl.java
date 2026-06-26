@@ -6,9 +6,12 @@ import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import cn.iocoder.yudao.module.jijian.controller.admin.query.vo.JijianQueryChatReqVO;
 import cn.iocoder.yudao.module.jijian.controller.admin.query.vo.JijianQueryChatRespVO;
 import cn.iocoder.yudao.module.jijian.controller.admin.queryhistory.vo.QueryHistoryPageReqVO;
+import cn.iocoder.yudao.module.jijian.dal.dataobject.operationauditlog.OperationAuditLogDO;
 import cn.iocoder.yudao.module.jijian.dal.dataobject.queryhistory.QueryHistoryDO;
+import cn.iocoder.yudao.module.jijian.dal.mysql.operationauditlog.OperationAuditLogMapper;
 import cn.iocoder.yudao.module.jijian.dal.mysql.queryhistory.QueryHistoryMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
 
@@ -22,10 +25,13 @@ import static cn.iocoder.yudao.module.jijian.enums.ErrorCodeConstants.QUERY_HIST
 
 @Service
 @Validated
+@Slf4j
 public class QueryHistoryServiceImpl implements QueryHistoryService {
 
     @Resource
     private QueryHistoryMapper queryHistoryMapper;
+    @Resource
+    private OperationAuditLogMapper operationAuditLogMapper;
     @Resource
     private ObjectMapper objectMapper;
     @Resource
@@ -48,6 +54,7 @@ public class QueryHistoryServiceImpl implements QueryHistoryService {
         history.setSuccess(success);
         history.setErrorMessage(errorMessage);
         queryHistoryMapper.insert(history);
+        createQueryAuditLog(history, respVO);
         return history.getId();
     }
 
@@ -112,5 +119,39 @@ public class QueryHistoryServiceImpl implements QueryHistoryService {
 
     private boolean isJijianAdmin() {
         return securityFrameworkService.hasAnyRoles("jijian_admin", "super_admin");
+    }
+
+    private void createQueryAuditLog(QueryHistoryDO history, JijianQueryChatRespVO respVO) {
+        try {
+            OperationAuditLogDO auditLog = new OperationAuditLogDO();
+            auditLog.setUserId(history.getUserId());
+            auditLog.setUserName(history.getUserName());
+            auditLog.setOperationType("query");
+            auditLog.setModuleName("jijian");
+            auditLog.setTargetTable(extractTables(respVO));
+            auditLog.setTargetId(String.valueOf(history.getId()));
+            auditLog.setRequestSummary(limit(history.getQuestion(), 1000));
+            auditLog.setResultSummary(limit(history.getAnswer(), 1000));
+            auditLog.setSuccess(history.getSuccess());
+            auditLog.setErrorMessage(limit(history.getErrorMessage(), 1000));
+            operationAuditLogMapper.insert(auditLog);
+        } catch (Exception ex) {
+            log.warn("[JijianAudit] 写入查询审计日志失败，不影响查询历史保存: {}", ex.getMessage());
+        }
+    }
+
+    private String extractTables(JijianQueryChatRespVO respVO) {
+        if (respVO == null || respVO.getDatabaseContextMeta() == null
+                || respVO.getDatabaseContextMeta().getTablesUsed() == null) {
+            return null;
+        }
+        return String.join(",", respVO.getDatabaseContextMeta().getTablesUsed());
+    }
+
+    private String limit(String text, int maxLength) {
+        if (text == null || text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength);
     }
 }

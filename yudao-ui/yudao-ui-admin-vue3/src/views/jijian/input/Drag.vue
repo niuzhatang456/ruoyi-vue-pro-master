@@ -242,6 +242,7 @@ const FORM_TYPE_OPTIONS = [
   { value: '租赁人员', label: '租赁人员' },
   { value: '租赁合同', label: '租赁合同' },
   { value: '食堂供应', label: '食堂供应' },
+  { value: '民生价格公告', label: '民生价格公告' },
 ]
 
 // ── 数据类型 ─────────────────────────────────────────────────────────────────
@@ -366,12 +367,27 @@ async function confirmSingle(row: FileResult) {
     row.status        = 'confirmed'
     row.businessTable = result.businessTable || row.formType
     row.businessIds   = JSON.stringify(result.confirmedIds)
-    ElMessage.success(`${row.formTypeName || row.formType} 写入 ${result.confirmedCount} 条`)
+    ElMessage.success(buildConfirmMessage(row.formTypeName || row.formType, result))
   } catch (err: unknown) {
     ElMessage.error(err instanceof Error ? err.message : '确认写入失败')
   } finally {
     row.confirming = false
   }
+}
+
+function buildConfirmMessage(formType: string, result: {
+  businessTable?: string
+  confirmedCount: number
+  totalRows?: number
+  skippedRows?: number
+  failedRows?: number
+  idempotent?: boolean
+}) {
+  const tableHint = result.businessTable ? ` → ${result.businessTable}` : ''
+  const stat = result.totalRows != null
+    ? `共解析 ${result.totalRows} 行，成功 ${result.confirmedCount} 行，跳过 ${result.skippedRows ?? 0} 行，失败 ${result.failedRows ?? 0} 行`
+    : `成功写入 ${result.confirmedCount} 条`
+  return `${formType}${tableHint}：${stat}${result.idempotent ? '（重复确认已幂等处理）' : ''}`
 }
 
 async function confirmAll() {

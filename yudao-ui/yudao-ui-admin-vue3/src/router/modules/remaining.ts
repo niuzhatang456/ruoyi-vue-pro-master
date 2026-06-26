@@ -75,7 +75,7 @@ const remainingRouter: AppRouteRecordRaw[] = [
   {
     path: '/input',
     component: Layout,
-    redirect: '/input/property-group',
+    redirect: '/input/drag',
     name: 'JijianInput',
     meta: {
       title: '录入数据',

@@ -166,13 +166,17 @@ public class JijianAiSqlAgentService {
         List<JijianMetricVO> finalMetrics = Collections.emptyList();
         List<JijianChartVO> finalCharts = Collections.emptyList();
         List<JijianAnalysisTableVO> finalTables = Collections.emptyList();
+        List<JijianAnalysisTableVO> rawDataTables = new ArrayList<>();
 
         // ── 若 DeepSeek 不可用，先检查能否直接用预查数据回答 ──
         boolean deepSeekEnabled = cfg.enabled && hasUsableKey(cfg.apiKey);
         if (!deepSeekEnabled) {
+            resp.setAiMode(cfg.enabled && !hasUsableKey(cfg.apiKey) ? "DEEPSEEK_KEY_MISSING" : "LOCAL_FALLBACK");
             finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson, aggrContextJson, sqlTrace);
             if (finalAnswer == null) {
-                finalAnswer = "AI 分析服务未启用，请配置 DeepSeek API Key 后重试。如需查询特定人员或最近导入数据，请确认问题包含人员姓名或[最近导入/刚刚导入]等关键词。";
+                finalAnswer = cfg.enabled && !hasUsableKey(cfg.apiKey)
+                        ? "DeepSeek API Key 未配置。请设置环境变量 DEEPSEEK_API_KEY 后重启后端；本次未调用外部大模型。"
+                        : "AI 分析服务未启用，请配置 DeepSeek API Key 后重试。如需查询特定人员或最近导入数据，请确认问题包含人员姓名或[最近导入/刚刚导入]等关键词。";
             }
         } else {
             // ── DeepSeek SQL Agent 主循环 ──
@@ -205,6 +209,7 @@ public class JijianAiSqlAgentService {
 
                 if (dsException != null) {
                     log.warn("[SqlAgent] DeepSeek call failed at round {}: {}", round, dsException.getMessage());
+                    resp.setAiMode("LOCAL_FALLBACK");
                     // DeepSeek 失败时尝试用预查数据回答
                     finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson, aggrContextJson, sqlTrace);
                     if (finalAnswer == null) {
@@ -272,6 +277,7 @@ public class JijianAiSqlAgentService {
                     }
 
                     sqlTrace.add(trace);
+                    rawDataTables.add(toRawDataTable(purpose, qr));
 
                     // 零结果兜底
                     if (qr.getTotalRowCount() == 0
@@ -374,7 +380,10 @@ public class JijianAiSqlAgentService {
         resp.setAnswer(finalAnswer != null ? finalAnswer : "分析完成。");
         resp.setMetrics(finalMetrics);
         resp.setCharts(finalCharts);
-        resp.setTables(finalTables);
+        List<JijianAnalysisTableVO> responseTables = new ArrayList<>();
+        responseTables.addAll(rawDataTables);
+        responseTables.addAll(finalTables);
+        resp.setTables(responseTables);
         resp.setSqlTrace(sqlTrace);
         resp.setDatabaseContextMeta(meta);
         resp.setData(Collections.emptyMap());
@@ -793,6 +802,22 @@ public class JijianAiSqlAgentService {
         } catch (Exception e) {
             return "{\"type\":\"sqlResult\",\"error\":\"序列化失败\"}";
         }
+    }
+
+    private JijianAnalysisTableVO toRawDataTable(String purpose, QueryResult qr) {
+        List<Map<String, String>> columns = new ArrayList<>();
+        for (String column : qr.getColumns()) {
+            Map<String, String> col = new LinkedHashMap<>();
+            col.put("key", column);
+            col.put("label", column);
+            columns.add(col);
+        }
+        return JijianAnalysisTableVO.builder()
+                .title((purpose == null || purpose.isBlank() ? "数据库原始数据" : purpose)
+                        + "（" + qr.getTotalRowCount() + " 行）")
+                .columns(columns)
+                .rows(qr.getRows())
+                .build();
     }
 
     // ===== 解析 DeepSeek 返回的 metrics/charts/tables =====

@@ -57,9 +57,22 @@ export const usePermissionStore = defineStore('permission', {
           }
         ])
         // 渲染菜单的所有路由
-        this.routers = cloneDeep(remainingRouter).filter((route) =>
+        const jijianMenuChildren = cloneDeep(remainingRouter).filter((route) =>
           jijianMenuRouteNames.includes(route.name as string)
         )
+        this.routers = [
+          {
+            path: '/',
+            redirect: '/input/drag',
+            name: 'JijianRootMenu',
+            meta: {
+              title: '纪检信息系统',
+              icon: 'ep:menu',
+              alwaysShow: true
+            },
+            children: jijianMenuChildren
+          }
+        ] as AppRouteRecordRaw[]
         resolve()
       })
     },

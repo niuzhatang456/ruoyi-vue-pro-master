@@ -194,10 +194,10 @@ spring:
     moonshot: # 月之暗面（KIMI）
       api-key: sk-abc
     deepseek: # DeepSeek
-      api-key: sk-e94db327cc7d457d99a8de8810fc6b12
+      api-key: ${DEEPSEEK_API_KEY:}
       chat:
         options:
-          model: deepseek-chat
+          model: ${DEEPSEEK_MODEL:deepseek-chat}
     model:
       rerank: false # 是否开启“通义千问”的 Rerank 模型，填写 dashscope 开启
     mcp:

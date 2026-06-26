@@ -452,7 +452,7 @@ async function confirmSingle(row: FileResult) {
     row.status        = 'confirmed'
     row.businessTable = result.businessTable || row.formType
     row.businessIds   = JSON.stringify(result.confirmedIds)
-    ElMessage.success(`${row.formTypeName || row.formType} 写入 ${result.confirmedCount} 条`)
+    ElMessage.success(buildConfirmMessage(row.formTypeName || row.formType, result))
     // 若该行正在内嵌预览中，刷新预览以显示"已确认"状态
     if (inlinePreviewRow.value === row && row.importRecordId) {
       try {
@@ -464,6 +464,21 @@ async function confirmSingle(row: FileResult) {
   } finally {
     row.confirming = false
   }
+}
+
+function buildConfirmMessage(formType: string, result: {
+  businessTable?: string
+  confirmedCount: number
+  totalRows?: number
+  skippedRows?: number
+  failedRows?: number
+  idempotent?: boolean
+}) {
+  const tableHint = result.businessTable ? ` → ${result.businessTable}` : ''
+  const stat = result.totalRows != null
+    ? `共解析 ${result.totalRows} 行，成功 ${result.confirmedCount} 行，跳过 ${result.skippedRows ?? 0} 行，失败 ${result.failedRows ?? 0} 行`
+    : `成功写入 ${result.confirmedCount} 条`
+  return `${formType}${tableHint}：${stat}${result.idempotent ? '（重复确认已幂等处理）' : ''}`
 }
 
 async function confirmAll() {

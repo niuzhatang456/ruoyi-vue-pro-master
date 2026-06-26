@@ -31,6 +31,10 @@
 
     <!-- 主聊天区 -->
     <div class="aigc-main">
+      <div class="prompt-bar">
+        <span>只分析本地数据库真实数据；数据库没有的内容会如实说明，手机号、身份证、营业执照等敏感字段默认脱敏。</span>
+      </div>
+
       <!-- 欢迎区（无消息时） -->
       <div v-if="currentMessages.length === 0" class="chat-welcome">
         <div class="welcome-icon">🔍</div>
@@ -139,8 +143,59 @@
                         min-width="100"
                         show-overflow-tooltip
                       />
+                      <el-table-column
+                        v-if="hasContractOriginalRows(tbl.rows)"
+                        label="合同原件"
+                        width="120"
+                        fixed="right"
+                      >
+                        <template #default="{ row }">
+                          <el-button
+                            v-if="getContractOriginalUrl(row)"
+                            type="primary"
+                            size="small"
+                            link
+                            @click="openContractOriginal(row)"
+                          >
+                            查看合同原件
+                          </el-button>
+                        </template>
+                      </el-table-column>
                     </el-table>
                   </div>
+                </div>
+
+                <!-- 数据库原始数据（规则查询接口返回） -->
+                <div v-if="msg.pageResult?.list?.length" class="result-table raw-data-table">
+                  <div class="table-title">数据库原始数据</div>
+                  <el-table :data="msg.pageResult.list" stripe size="small" max-height="300">
+                    <el-table-column
+                      v-for="col in msg.columns"
+                      :key="col.key"
+                      :prop="col.key"
+                      :label="col.label"
+                      min-width="110"
+                      show-overflow-tooltip
+                    />
+                    <el-table-column
+                      v-if="hasContractOriginalRows(msg.pageResult.list)"
+                      label="合同原件"
+                      width="120"
+                      fixed="right"
+                    >
+                      <template #default="{ row }">
+                        <el-button
+                          v-if="getContractOriginalUrl(row)"
+                          type="primary"
+                          size="small"
+                          link
+                          @click="openContractOriginal(row)"
+                        >
+                          查看合同原件
+                        </el-button>
+                      </template>
+                    </el-table-column>
+                  </el-table>
                 </div>
 
                 <!-- 数据来源元信息 -->
@@ -158,7 +213,7 @@
                 <div v-if="msg.sqlTrace && msg.sqlTrace.length" class="sql-trace-wrap">
                   <div class="sql-trace-header" @click="msg.sqlTraceExpanded = !msg.sqlTraceExpanded">
                     <span class="sql-trace-toggle">{{ msg.sqlTraceExpanded ? '▾' : '▸' }}</span>
-                    <span>查询痕迹（共执行 {{ msg.sqlTrace.length }} 条 SQL）</span>
+                    <span>只读查询审计（共 {{ msg.sqlTrace.length }} 次数据库查询）</span>
                   </div>
                   <div v-if="msg.sqlTraceExpanded" class="sql-trace-body">
                     <div v-for="(t, ti) in msg.sqlTrace" :key="ti" class="sql-trace-item">
@@ -233,6 +288,8 @@ interface ChatMessage {
   metrics?: JijianMetricVO[]
   charts?: JijianChartVO[]
   tables?: JijianAnalysisTableVO[]
+  columns?: Array<{ key: string; label: string }>
+  pageResult?: { list: Array<Record<string, any>>; total: number }
   databaseContextMeta?: JijianDatabaseContextMetaVO
   sqlTrace?: JijianSqlTraceVO[]
   sqlTraceExpanded?: boolean
@@ -429,6 +486,8 @@ const sendMessage = async () => {
       metrics: resp.metrics ?? [],
       charts: resp.charts ?? [],
       tables: resp.tables ?? [],
+      columns: resp.columns ?? [],
+      pageResult: resp.pageResult,
       databaseContextMeta: resp.databaseContextMeta,
       sqlTrace: resp.sqlTrace ?? [],
       sqlTraceExpanded: false,
@@ -489,6 +548,8 @@ const historyToMessages = (history: QueryHistoryVO): ChatMessage[] => {
       metrics: result.metrics || [],
       charts: result.charts || [],
       tables: result.tables || [],
+      columns: result.columns || [],
+      pageResult: result.pageResult,
       databaseContextMeta: parseJson(history.databaseContextMetaJson),
       sqlTrace: result.sqlTrace || [],
       sqlTraceExpanded: false,
@@ -541,6 +602,27 @@ const handleDispose = async (message: ChatMessage, index: number) => {
     sourceModule: 'smart_query'
   })
   ElMessage.success('处置记录已保存')
+}
+
+const getContractOriginalUrl = (row: Record<string, any>): string => {
+  if (!isContractRow(row)) return ''
+  return String(row.originalFileUrl || row.original_file_url || row.fileUrl || row.file_url || '').trim()
+}
+
+const hasContractOriginalRows = (rows?: Array<Record<string, any>>): boolean =>
+  (rows || []).some((row) => Boolean(getContractOriginalUrl(row)))
+
+const openContractOriginal = (row: Record<string, any>) => {
+  const url = getContractOriginalUrl(row)
+  if (!url) return
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+const isContractRow = (row: Record<string, any>): boolean => {
+  const keys = Object.keys(row || {})
+  return keys.some((key) => /contract|合同/.test(key))
+    || row.businessTable === 'jijian_lease_contract'
+    || row.business_table === 'jijian_lease_contract'
 }
 
 const buildErrorMessage = (e: any): string => {
@@ -641,6 +723,7 @@ watch(latestAiIdx, async (idx) => {
 const aiModeText = (mode?: string) => {
   switch (mode) {
     case 'DEEPSEEK_SQL_AGENT': return 'SQL Agent 全量分析'
+    case 'DEEPSEEK_KEY_MISSING': return 'DeepSeek Key 未配置'
     case 'DEEPSEEK_DATA_ANALYSIS': return 'DeepSeek 数据分析'
     case 'DEEPSEEK_SUMMARY': return 'DeepSeek 摘要'
     case 'DEEPSEEK_INTENT': return 'DeepSeek 解析'
@@ -745,6 +828,16 @@ onUnmounted(() => disposeCharts())
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.prompt-bar {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--el-border-color-light);
+  background: var(--el-fill-color-blank);
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 /* ===== 欢迎区 ===== */
@@ -979,6 +1072,11 @@ onUnmounted(() => disposeCharts())
 /* 数据表格 */
 .result-table {
   margin-top: 12px;
+}
+
+.raw-data-table {
+  border-top: 1px dashed var(--el-border-color-light);
+  padding-top: 10px;
 }
 
 .table-title {
