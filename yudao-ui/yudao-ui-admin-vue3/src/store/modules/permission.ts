@@ -8,6 +8,28 @@ import { CACHE_KEY, useCache } from '@/hooks/web/useCache'
 const { wsCache } = useCache()
 
 const jijianMenuRouteNames = ['JijianInput', 'JijianQuery', 'JijianMe']
+const jijianMenuPathMap: Record<string, string> = {
+  JijianInput: '/jijian/input',
+  JijianQuery: '/jijian/query',
+  JijianMe: '/jijian/me'
+}
+
+const normalizeJijianMenuPath = (path?: string) => {
+  if (!path) return path
+  if (path.startsWith('/jijian/')) return path
+  if (path.startsWith('/input')) return `/jijian${path}`
+  if (path.startsWith('/query')) return `/jijian${path}`
+  if (path.startsWith('/me')) return `/jijian${path}`
+  return path
+}
+
+const normalizeJijianMenuRoute = (route: AppRouteRecordRaw): AppRouteRecordRaw => {
+  const mappedPath = jijianMenuPathMap[route.name as string]
+  route.path = mappedPath || normalizeJijianMenuPath(route.path) || route.path
+  route.redirect = normalizeJijianMenuPath(route.redirect as string) || route.redirect
+  route.children = route.children?.map((child) => normalizeJijianMenuRoute(child))
+  return route
+}
 
 export interface PermissionState {
   routers: AppRouteRecordRaw[]
@@ -57,13 +79,13 @@ export const usePermissionStore = defineStore('permission', {
           }
         ])
         // 渲染菜单的所有路由
-        const jijianMenuChildren = cloneDeep(remainingRouter).filter((route) =>
-          jijianMenuRouteNames.includes(route.name as string)
-        )
+        const jijianMenuChildren = cloneDeep(remainingRouter)
+          .filter((route) => jijianMenuRouteNames.includes(route.name as string))
+          .map((route) => normalizeJijianMenuRoute(route))
         this.routers = [
           {
             path: '/',
-            redirect: '/input/drag',
+            redirect: '/jijian/input/drag',
             name: 'JijianRootMenu',
             meta: {
               title: '纪检信息系统',
