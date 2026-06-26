@@ -144,7 +144,7 @@ public class JijianAttendanceAnalysisService {
         }
         for (BusinessTripDO r : tripList) {
             if (matchEmployee(item, r.getApplicantName(), r.getEmployeeNo(), r.getDepartment())
-                    && overlaps(r.getStartTime(), r.getEndTime(), dayStart, dayEnd)) {
+                    && overlaps(businessTripStart(r), businessTripEnd(r), dayStart, dayEnd)) {
                 return new ExplainSource("出差");
             }
         }
@@ -392,6 +392,14 @@ public class JijianAttendanceAnalysisService {
         m.put(k1, v1);
         m.put(k2, v2);
         return m;
+    }
+
+    private LocalDateTime businessTripStart(BusinessTripDO item) {
+        return item.getStartDate() != null ? item.getStartDate() : item.getStartTime();
+    }
+
+    private LocalDateTime businessTripEnd(BusinessTripDO item) {
+        return item.getEndDate() != null ? item.getEndDate() : item.getEndTime();
     }
 
     private Map<String, String> col(String key, String label) {

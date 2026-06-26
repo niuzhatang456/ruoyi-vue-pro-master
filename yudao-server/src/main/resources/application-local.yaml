@@ -288,7 +288,7 @@ jijian:
     endpoint: http://127.0.0.1:8868/ocr    # OCR识别端点
     health-endpoint: http://127.0.0.1:8868/health  # 健康检查端点
     timeout-seconds: 60
-    max-pdf-pages: 3
+    max-pdf-pages: 5
     check-on-startup: true                  # 启动时检测OCR可用性（仅输出日志，不阻塞）
     auto-start: false                       # 是否自动拉起本地PaddleOCR（本地开发可改true）
     work-dir: "D:\\VScode\\data\\ruoyi-vue-pro-master\\tools\\paddleocr-service"

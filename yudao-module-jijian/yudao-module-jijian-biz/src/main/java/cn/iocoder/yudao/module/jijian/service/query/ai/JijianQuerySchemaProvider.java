@@ -93,6 +93,7 @@ public class JijianQuerySchemaProvider {
             + "        {\"name\":\"end_date\",\"type\":\"DATETIME\",\"desc\":\"出差结束日期\"},\n"
             + "        {\"name\":\"trip_days\",\"type\":\"DECIMAL\",\"desc\":\"出差天数\"},\n"
             + "        {\"name\":\"trip_personnel\",\"type\":\"VARCHAR\",\"desc\":\"出差人员（逗号分隔）\"},\n"
+            + "        {\"name\":\"trip_people_count\",\"type\":\"INT\",\"desc\":\"出差人数\"},\n"
             + "        {\"name\":\"is_outside\",\"type\":\"VARCHAR\",\"desc\":\"是否出义（原文：出义/不出义/是/否）\"},\n"
             + "        {\"name\":\"outside_location\",\"type\":\"VARCHAR\",\"desc\":\"出义地点\"},\n"
             + "        {\"name\":\"remark\",\"type\":\"VARCHAR\",\"desc\":\"备注\"},\n"
@@ -183,6 +184,22 @@ public class JijianQuerySchemaProvider {
             + "{\"name\":\"purchase_point\",\"type\":\"VARCHAR\",\"desc\":\"采价点\"},"
             + "{\"name\":\"remark\",\"type\":\"VARCHAR\",\"desc\":\"备注\"},"
             + "{\"name\":\"deleted\",\"type\":\"TINYINT\",\"desc\":\"逻辑删除标记\"}]\n"
+            + "    },\n"
+            + "    {\n"
+            + "      \"tableName\":\"jijian_canteen_market_price\",\"description\":\"义乌市民生商品市场零售价格信息公告表\",\n"
+            + "      \"columns\":["
+            + "{\"name\":\"id\",\"type\":\"BIGINT\",\"desc\":\"主键ID\"},"
+            + "{\"name\":\"item_name\",\"type\":\"VARCHAR\",\"desc\":\"项目名称/商品名称\"},"
+            + "{\"name\":\"spec_level\",\"type\":\"VARCHAR\",\"desc\":\"规格/等级\"},"
+            + "{\"name\":\"unit\",\"type\":\"VARCHAR\",\"desc\":\"单位\"},"
+            + "{\"name\":\"price\",\"type\":\"DECIMAL\",\"desc\":\"价格\"},"
+            + "{\"name\":\"price_point\",\"type\":\"VARCHAR\",\"desc\":\"采价点\"},"
+            + "{\"name\":\"price_month\",\"type\":\"VARCHAR\",\"desc\":\"公告年月，格式如 2025-02\"},"
+            + "{\"name\":\"source_title\",\"type\":\"VARCHAR\",\"desc\":\"公告标题\"},"
+            + "{\"name\":\"source_file_name\",\"type\":\"VARCHAR\",\"desc\":\"来源文件名\"},"
+            + "{\"name\":\"source_parsed_data_id\",\"type\":\"BIGINT\",\"desc\":\"来源导入批次ID\"},"
+            + "{\"name\":\"deleted\",\"type\":\"TINYINT\",\"desc\":\"逻辑删除标记\"}],\n"
+            + "      \"compareRule\":\"按 item_name 相同、price_month 相同聚合同一商品同月不同采价点价格，可计算最高价、最低价、均价、差额。\"\n"
             + "    }\n"
             + "  ],\n"
             + "  \"rules\": [\n"
@@ -210,6 +227,7 @@ public class JijianQuerySchemaProvider {
                 || lower.equals("jijian_property")
                 || lower.equals("jijian_lessee")
                 || lower.equals("jijian_lease_contract")
-                || lower.equals("jijian_canteen_supplier");
+                || lower.equals("jijian_canteen_supplier")
+                || lower.equals("jijian_canteen_market_price");
     }
 }

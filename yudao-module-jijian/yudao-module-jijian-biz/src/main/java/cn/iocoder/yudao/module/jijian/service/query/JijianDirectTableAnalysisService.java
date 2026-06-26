@@ -152,13 +152,15 @@ public class JijianDirectTableAnalysisService {
                 m.put("applicantName", nvl(r.getApplicantName()));
                 m.put("employeeNo", nvl(r.getEmployeeNo()));
                 m.put("department", nvl(r.getDepartment()));
-                m.put("leaveType", nvl(r.getLeaveType()));
-                m.put("leaveReason", nvl(r.getLeaveReason()));
-                m.put("startTime", fmtDt(r.getStartTime()));
-                m.put("endTime", fmtDt(r.getEndTime()));
-                m.put("leaveDays", r.getLeaveDays() != null ? r.getLeaveDays().toPlainString() : "");
-                m.put("leaveStatus", nvl(r.getLeaveStatus()));
-                m.put("isOutside", r.getIsOutside() != null ? r.getIsOutside() : "");
+                m.put("tripReason", nvl(r.getTripReason()));
+                m.put("departurePlace", nvl(r.getDeparturePlace()));
+                m.put("destination", nvl(r.getDestination()));
+                m.put("startTime", fmtDt(businessTripStart(r)));
+                m.put("endTime", fmtDt(businessTripEnd(r)));
+                m.put("leaveDays", r.getTripDays() != null ? r.getTripDays().toPlainString() : "");
+                m.put("tripPersonnel", nvl(r.getTripPersonnel()));
+                m.put("tripPeopleCount", r.getTripPeopleCount() != null ? r.getTripPeopleCount() : "");
+                m.put("isOutside", nvl(r.getIsOutside()));
                 m.put("outsideLocation", nvl(r.getOutsideLocation()));
                 m.put("remark", nvl(r.getRemark()));
                 return m;
@@ -328,6 +330,17 @@ public class JijianDirectTableAnalysisService {
             cols.add(col("endTime", "结束时间"));
             cols.add(col("leaveDays", "天数"));
             cols.add(col("workYears", "工龄"));
+        } else if (JijianQueryFormTypeEnum.BUSINESS_TRIP.getValue().equals(formType)) {
+            cols.add(col("tripReason", "出差事由"));
+            cols.add(col("departurePlace", "出发地"));
+            cols.add(col("destination", "目的地"));
+            cols.add(col("startTime", "出差开始时间"));
+            cols.add(col("endTime", "出差结束时间"));
+            cols.add(col("leaveDays", "出差天数"));
+            cols.add(col("tripPersonnel", "出差人员"));
+            cols.add(col("tripPeopleCount", "出差人数"));
+            cols.add(col("isOutside", "是否出义"));
+            cols.add(col("outsideLocation", "出义地点"));
         } else {
             cols.add(col("leaveType", "假别"));
             cols.add(col("leaveReason", "事由"));
@@ -377,6 +390,17 @@ public class JijianDirectTableAnalysisService {
             schema.put("leaveDays", "疗休养天数");
             schema.put("workYears", "工龄");
             schema.put("startWorkTime", "参加工作时间");
+        } else if (JijianQueryFormTypeEnum.BUSINESS_TRIP.getValue().equals(formType)) {
+            schema.put("tripReason", "出差事由");
+            schema.put("departurePlace", "出发地");
+            schema.put("destination", "目的地");
+            schema.put("startTime", "出差开始时间");
+            schema.put("endTime", "出差结束时间");
+            schema.put("leaveDays", "出差天数");
+            schema.put("tripPersonnel", "出差人员");
+            schema.put("tripPeopleCount", "出差人数");
+            schema.put("isOutside", "是否出义");
+            schema.put("outsideLocation", "出义地点");
         } else {
             schema.put("leaveType", "假别类型");
             schema.put("leaveReason", "请假事由");
@@ -405,6 +429,14 @@ public class JijianDirectTableAnalysisService {
     private String fmtDt(LocalDateTime dt) {
         if (dt == null) return "";
         return dt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+    }
+
+    private LocalDateTime businessTripStart(BusinessTripDO item) {
+        return item.getStartDate() != null ? item.getStartDate() : item.getStartTime();
+    }
+
+    private LocalDateTime businessTripEnd(BusinessTripDO item) {
+        return item.getEndDate() != null ? item.getEndDate() : item.getEndTime();
     }
 
     private double parseDuration(Object val) {

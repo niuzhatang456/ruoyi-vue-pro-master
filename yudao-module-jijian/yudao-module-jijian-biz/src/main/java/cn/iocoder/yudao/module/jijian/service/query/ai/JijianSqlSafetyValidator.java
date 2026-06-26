@@ -37,7 +37,8 @@ public class JijianSqlSafetyValidator {
             "jijian_property",
             "jijian_lessee",
             "jijian_lease_contract",
-            "jijian_canteen_supplier"
+            "jijian_canteen_supplier",
+            "jijian_canteen_market_price"
     );
 
     private static final List<String> SENSITIVE_FIELD_PATTERNS = Arrays.asList(

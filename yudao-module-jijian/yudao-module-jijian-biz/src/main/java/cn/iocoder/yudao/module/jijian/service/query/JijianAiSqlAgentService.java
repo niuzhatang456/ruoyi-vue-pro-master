@@ -341,7 +341,8 @@ public class JijianAiSqlAgentService {
         List<String> knownTables = List.of(
                 "jijian_compensatory_leave", "jijian_leave_health", "jijian_leave_personal",
                 "jijian_business_trip", "jijian_attendance_daily", "jijian_property",
-                "jijian_lessee", "jijian_lease_contract", "jijian_canteen_supplier");
+                "jijian_lessee", "jijian_lease_contract", "jijian_canteen_supplier",
+                "jijian_canteen_market_price");
         for (JijianSqlTraceVO t : sqlTrace) {
             if (t.getError() == null) {
                 String lowerSql = t.getSql() == null ? "" : t.getSql().toLowerCase();
@@ -919,7 +920,10 @@ public class JijianAiSqlAgentService {
             hints.add("优先查 jijian_leave_personal（事假，字段：applicant_name/leave_type/leave_reason/start_time/end_time/leave_days）");
         }
         if (rawMessage.contains("出差") || rawMessage.contains("出发地") || rawMessage.contains("目的地")) {
-            hints.add("优先查 jijian_business_trip（出差，字段：applicant_name/trip_reason/departure_place/destination/start_date/end_date/trip_days）");
+            hints.add("优先查 jijian_business_trip（出差，字段：applicant_name/trip_reason/departure_place/destination/start_date/end_date/trip_days/trip_people_count）");
+        }
+        if (rawMessage.contains("民生") || rawMessage.contains("价格公告") || rawMessage.contains("采价点") || rawMessage.contains("价格对比")) {
+            hints.add("优先查 jijian_canteen_market_price（民生商品价格公告，字段：item_name/spec_level/unit/price/price_point/price_month），按 item_name 和 price_month 做同商品同月对比");
         }
         if (rawMessage.contains("调休") || rawMessage.contains("补休") || rawMessage.contains("调休时长")) {
             hints.add("优先查 jijian_compensatory_leave（调休/加班，字段：applicant_name/overtime_start_time/compensatory_start_time/compensatory_duration）");

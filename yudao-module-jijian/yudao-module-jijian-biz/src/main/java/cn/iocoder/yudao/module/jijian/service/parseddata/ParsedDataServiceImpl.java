@@ -19,6 +19,7 @@ import cn.iocoder.yudao.module.jijian.util.JijianExcelMergedCellUtils;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
@@ -100,7 +101,8 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             "jijian_property",
             "jijian_lessee",
             "jijian_lease_contract",
-            "jijian_canteen_supplier"
+            "jijian_canteen_supplier",
+            "jijian_canteen_market_price"
     )));
 
     @Resource private ParsedDataMapper            parsedDataMapper;
@@ -139,6 +141,9 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             }
             if (FormTypeConstants.CANTEEN.equals(formType)) {
                 enrichCanteenParsedData(payload.parsedData);
+            }
+            if (FormTypeConstants.CANTEEN_MARKET_PRICE.equals(formType)) {
+                enrichCanteenMarketPriceParsedData(payload.parsedData);
             }
             if (StrUtil.isBlank(formType)) {
                 String hint = extractHeadersHint(payload);
@@ -180,6 +185,9 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             }
             if (FormTypeConstants.CANTEEN.equals(forcedFormType)) {
                 enrichCanteenParsedData(payload.parsedData);
+            }
+            if (FormTypeConstants.CANTEEN_MARKET_PRICE.equals(forcedFormType)) {
+                enrichCanteenMarketPriceParsedData(payload.parsedData);
             }
             ParsedDataDO parsedData = ParsedDataDO.builder()
                     .importRecordId(importRecord.getId())
@@ -436,8 +444,9 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             businessTable = resolveBusinessTableFromFormType(parsedData.getFormType());
         }
         if (StrUtil.isBlank(businessTable)) {
+            int metadataDeleted = deleteImportMetadata(parsedData);
             return new DeleteBusinessDataResult(0, null, parsedDataId,
-                    "该解析记录尚未确认写入业务表，无需删除");
+                    "该解析记录尚未确认写入业务表；已删除导入记录和解析记录 " + metadataDeleted + " 条");
         }
 
         // 白名单校验，防止误操作非业务表
@@ -450,20 +459,33 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         Integer count = jdbcTemplate.queryForObject(countSql, Integer.class, parsedDataId);
         int toDelete = count != null ? count : 0;
 
-        if (toDelete == 0) {
-            return new DeleteBusinessDataResult(0, businessTable, parsedDataId,
-                    "业务表中已无该批次数据（source_parsed_data_id=" + parsedDataId + "），可能已删除或从未写入");
+        int deleted = 0;
+        if (toDelete > 0) {
+            String deleteSql = "UPDATE `" + businessTable + "` SET deleted = 1, updater = 'batch-delete', update_time = NOW()" +
+                               " WHERE source_parsed_data_id = ? AND deleted = 0";
+            deleted = jdbcTemplate.update(deleteSql, parsedDataId);
+
+            log.info("[deleteBusinessData] parsedDataId={} businessTable={} 逻辑删除 {} 条",
+                    parsedDataId, businessTable, deleted);
         }
-
-        String deleteSql = "UPDATE `" + businessTable + "` SET deleted = 1, updater = 'batch-delete', update_time = NOW()" +
-                           " WHERE source_parsed_data_id = ? AND deleted = 0";
-        int deleted = jdbcTemplate.update(deleteSql, parsedDataId);
-
-        log.info("[deleteBusinessData] parsedDataId={} businessTable={} 逻辑删除 {} 条",
-                parsedDataId, businessTable, deleted);
+        int metadataDeleted = deleteImportMetadata(parsedData);
 
         return new DeleteBusinessDataResult(deleted, businessTable, parsedDataId,
-                "已删除 " + deleted + " 条数据（表：" + businessTable + "，批次ID：" + parsedDataId + "）");
+                "已删除业务数据 " + deleted + " 条，并删除导入记录/解析记录 " + metadataDeleted
+                        + " 条（表：" + businessTable + "，批次ID：" + parsedDataId + "）");
+    }
+
+    private int deleteImportMetadata(ParsedDataDO parsedData) {
+        int deleted = 0;
+        Long importRecordId = parsedData.getImportRecordId();
+        if (importRecordId != null) {
+            deleted += parsedDataMapper.delete(new LambdaQueryWrapper<ParsedDataDO>()
+                    .eq(ParsedDataDO::getImportRecordId, importRecordId));
+            deleted += importRecordMapper.deleteById(importRecordId);
+        } else {
+            deleted += parsedDataMapper.deleteById(parsedData.getId());
+        }
+        return deleted;
     }
 
     /** 根据 formType 推断对应的业务表名 */
@@ -918,6 +940,61 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private void enrichCanteenMarketPriceParsedData(Map<String, Object> parsedData) {
+        String scanText = (String) parsedData.remove("_fullScanText");
+        if (StrUtil.isBlank(scanText)) {
+            scanText = (String) parsedData.getOrDefault("ocrText", "");
+        }
+        String title = extractMarketPriceTitle(scanText);
+        String priceMonth = extractMarketPriceMonth(StrUtil.blankToDefault(title, scanText));
+
+        Object headersObj = parsedData.get("headers");
+        Object rowsObj = parsedData.get("rows");
+        if (headersObj instanceof List && rowsObj instanceof List) {
+            List<String> headers = (List<String>) headersObj;
+            List<Map<String, String>> rows = (List<Map<String, String>>) rowsObj;
+            if (!headers.contains("日期")) {
+                headers.add("日期");
+            }
+            for (Map<String, String> row : rows) {
+                row.put("日期", StrUtil.blankToDefault(priceMonth, ""));
+            }
+            parsedData.put("totalRows", rows.size());
+        }
+        parsedData.put("sourceTitle", StrUtil.blankToDefault(title, "义乌市民生商品市场零售价格信息公告"));
+        parsedData.put("priceMonth", StrUtil.blankToDefault(priceMonth, ""));
+        parsedData.put("scanText", StrUtil.maxLength(scanText, 4000));
+        if (StrUtil.isBlank(priceMonth)) {
+            parsedData.put("ocrNotice", "未能从标题识别公告年月，请在预览中核对「日期」列并手工补齐后再确认写入。");
+        }
+    }
+
+    private String extractMarketPriceTitle(String text) {
+        if (StrUtil.isBlank(text)) return null;
+        for (String line : text.split("\\r?\\n")) {
+            if (line.contains("民生商品市场零售价格") || line.contains("价格信息公告")) {
+                return StrUtil.trim(line);
+            }
+        }
+        Matcher matcher = Pattern.compile("义乌市民生商品市场零售价格信息公告[（(]?\\s*20\\d{2}\\s*年\\s*\\d{1,2}\\s*月[）)]?")
+                .matcher(text);
+        return matcher.find() ? matcher.group() : null;
+    }
+
+    private String extractMarketPriceMonth(String text) {
+        if (StrUtil.isBlank(text)) return null;
+        Matcher cn = Pattern.compile("(20\\d{2})\\s*年\\s*(\\d{1,2})\\s*月").matcher(text);
+        if (cn.find()) {
+            return cn.group(1) + "-" + String.format("%02d", Integer.parseInt(cn.group(2)));
+        }
+        Matcher dash = Pattern.compile("(20\\d{2})[-/.](\\d{1,2})").matcher(text);
+        if (dash.find()) {
+            return dash.group(1) + "-" + String.format("%02d", Integer.parseInt(dash.group(2)));
+        }
+        return null;
+    }
+
     // ==================== 租赁合同 OCR / 文本解析 ====================
 
     private ParsedPayload parseLeaseContract(MultipartFile file, String fname) throws Exception {
@@ -1033,6 +1110,11 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         if (containsAny(c, "出差", "出差事由", "出差类型", "出差开始")) return FormTypeConstants.BUSINESS_TRIP;
         if (containsAny(c, "事假", "请假类型", "请假事由", "请假开始", "假期类型")) return FormTypeConstants.LEAVE_PERSONAL;
         if (containsAny(c, "考勤", "打卡", "上班打卡", "下班打卡", "考勤日期")) return FormTypeConstants.ATTENDANCE;
+        if (containsAny(c, "义乌市民生商品市场零售价格信息公告", "民生商品市场零售价格", "价格信息公告")
+                || (containsAny(c, "项目名称", "规格/等级", "规格、等级")
+                && containsAny(c, "采价点", "价格"))) {
+            return FormTypeConstants.CANTEEN_MARKET_PRICE;
+        }
         // 食堂：采价点/采购点/商品名称/配送单/供应商也作为识别依据
         if (containsAny(c, "食堂", "食堂配送单", "物品名称", "商品名称", "项目名称", "规格等级", "规格、等级",
                          "采购点", "采价点", "采购地点", "配送单", "供应商", "供货商", "单价", "价格")) return FormTypeConstants.CANTEEN;

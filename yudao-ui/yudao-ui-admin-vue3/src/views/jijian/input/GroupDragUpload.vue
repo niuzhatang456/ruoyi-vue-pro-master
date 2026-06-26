@@ -280,6 +280,7 @@ const ALL_FORM_TYPE_OPTIONS = [
   { value: '租赁人员', label: '租赁人员' },
   { value: '租赁合同', label: '租赁合同' },
   { value: '食堂供应', label: '食堂供应' },
+  { value: '民生价格公告', label: '民生价格公告' },
 ]
 
 /** 当前入口允许的选项（用于类型选择器） */

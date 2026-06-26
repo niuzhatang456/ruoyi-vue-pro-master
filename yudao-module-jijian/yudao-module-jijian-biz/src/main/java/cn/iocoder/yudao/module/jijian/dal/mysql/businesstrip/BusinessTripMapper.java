@@ -21,8 +21,9 @@ public interface BusinessTripMapper extends BaseMapperX<BusinessTripDO> {
 
     default PageResult<BusinessTripDO> selectPageForQuery(PageParam pageParam, String department, LocalDateTime startTime) {
         QueryWrapper<BusinessTripDO> wrapper = new QueryWrapper<BusinessTripDO>()
-                .ge("create_time", startTime)
-                .orderByDesc("create_time");
+                .and(w -> w.ge("start_date", startTime)
+                        .or(q -> q.isNull("start_date").ge("create_time", startTime)))
+                .orderByDesc("COALESCE(start_date, create_time)");
         if (department != null && !"ALL".equals(department) && !department.isEmpty()) {
             wrapper.eq("department", department);
         }
@@ -31,7 +32,8 @@ public interface BusinessTripMapper extends BaseMapperX<BusinessTripDO> {
 
     default List<BusinessTripDO> selectListForQuery(String department, LocalDateTime startTime) {
         QueryWrapper<BusinessTripDO> wrapper = new QueryWrapper<BusinessTripDO>()
-                .ge("create_time", startTime);
+                .and(w -> w.ge("start_date", startTime)
+                        .or(q -> q.isNull("start_date").ge("create_time", startTime)));
         if (department != null && !"ALL".equals(department) && !department.isEmpty()) {
             wrapper.eq("department", department);
         }
@@ -49,8 +51,8 @@ public interface BusinessTripMapper extends BaseMapperX<BusinessTripDO> {
 
     default List<BusinessTripDO> selectListInDateRange(LocalDateTime startTime, LocalDateTime endTime, String department) {
         LambdaQueryWrapper<BusinessTripDO> wrapper = new LambdaQueryWrapper<BusinessTripDO>()
-                .lt(BusinessTripDO::getStartTime, endTime)
-                .gt(BusinessTripDO::getEndTime, startTime);
+                .lt(BusinessTripDO::getStartDate, endTime)
+                .gt(BusinessTripDO::getEndDate, startTime);
         if (department != null && !"ALL".equals(department)) {
             wrapper.eq(BusinessTripDO::getDepartment, department);
         }

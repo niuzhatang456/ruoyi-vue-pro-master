@@ -406,6 +406,17 @@ const remainingRouter: AppRouteRecordRaw[] = [
     }
   },
   {
+    path: '/jijian/:pathMatch(.*)*',
+    redirect: (to) => {
+      const match = to.params.pathMatch
+      const suffix = Array.isArray(match) ? match.join('/') : match
+      return suffix ? `/${suffix}` : '/input/drag'
+    },
+    meta: {
+      hidden: true
+    }
+  },
+  {
     path: '/:pathMatch(.*)*',
     component: () => import('@/views/Error/404.vue'),
     name: '',

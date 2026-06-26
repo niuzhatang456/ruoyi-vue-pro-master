@@ -37,6 +37,8 @@ public class BusinessTripDO extends TenantBaseDO {
     private BigDecimal tripDays;
     /** 出差人员（逗号分隔）*/
     private String tripPersonnel;
+    /** 出差人数 */
+    private Integer tripPeopleCount;
 
     /** 是否出义（原文：出义/不出义/是/否） */
     private String isOutside;

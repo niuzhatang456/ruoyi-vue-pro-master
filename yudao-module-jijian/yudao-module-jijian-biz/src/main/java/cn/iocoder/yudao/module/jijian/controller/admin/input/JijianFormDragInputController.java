@@ -23,11 +23,11 @@ import java.time.format.DateTimeFormatter;
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 
 /**
- * 纪检 9 类表单独立拖拽录入接口。
+ * 纪检表单独立拖拽录入接口。
  * 每个端点服务端硬绑定 formType，不依赖前端传参或文件内容自动识别。
  * 内部复用 ParsedDataService 解析能力，走相同的 upload → parsedData → confirmWrite 流程。
  */
-@Tag(name = "Admin - 纪检表单拖拽录入（9类独立接口）")
+@Tag(name = "Admin - 纪检表单拖拽录入")
 @RestController
 @RequestMapping("/jijian/input")
 @Validated
@@ -103,6 +103,13 @@ public class JijianFormDragInputController {
     @Operation(summary = "食堂供应商信息表 - 拖拽上传")
     public CommonResult<ImportRecordRespVO> uploadCanteenSupplier(@RequestParam("file") MultipartFile file) {
         return success(doUpload(file, FormTypeConstants.CANTEEN));
+    }
+
+    // ───── 民生商品市场零售价格公告 CANTEEN_MARKET_PRICE ─────
+    @PostMapping("/canteen-market-price/drag-upload")
+    @Operation(summary = "民生商品市场零售价格公告 - 拖拽上传")
+    public CommonResult<ImportRecordRespVO> uploadCanteenMarketPrice(@RequestParam("file") MultipartFile file) {
+        return success(doUpload(file, FormTypeConstants.CANTEEN_MARKET_PRICE));
     }
 
     // ───── 公共解析逻辑（服务端硬绑定 formType） ─────

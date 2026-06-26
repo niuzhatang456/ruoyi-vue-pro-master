@@ -240,10 +240,10 @@ public class JijianActualTableQueryService {
                 departments = businessTripMapper.selectDistinctDepartments();
                 List<BusinessTripDO> all = businessTripMapper.selectListForQuery("ALL", ALL_DATA_START);
                 for (BusinessTripDO r : all) {
-                    addMonth(monthsSet, r.getStartTime() != null ? r.getStartTime() : r.getCreateTime());
+                    addMonth(monthsSet, businessTripStart(r));
                 }
                 DateBound b = dateBoundDT(all.stream()
-                        .map(r -> r.getStartTime() != null ? r.getStartTime() : r.getCreateTime())
+                        .map(this::businessTripStart)
                         .collect(Collectors.toList()));
                 minDate = b.min; maxDate = b.max;
                 break;
@@ -463,18 +463,19 @@ public class JijianActualTableQueryService {
                     "department", item.getDepartment(),
                     "applicantName", item.getApplicantName(),
                     "employeeNo", item.getEmployeeNo(),
-                    "leaveType", item.getLeaveType(),
-                    "leaveReason", item.getLeaveReason(),
-                    "startTime", item.getStartTime(),
-                    "endTime", item.getEndTime(),
-                    "leaveDays", item.getLeaveDays(),
-                    "outside", Boolean.TRUE.equals(item.getIsOutside()),
+                    "tripReason", item.getTripReason(),
+                    "departurePlace", item.getDeparturePlace(),
+                    "destination", item.getDestination(),
+                    "startTime", businessTripStart(item),
+                    "endTime", businessTripEnd(item),
+                    "tripDays", item.getTripDays(),
+                    "tripPersonnel", item.getTripPersonnel(),
+                    "tripPeopleCount", item.getTripPeopleCount(),
+                    "outside", item.getIsOutside(),
                     "outsideLocation", item.getOutsideLocation(),
-                    "leaveStatus", item.getLeaveStatus(),
-                    "leaveMonth", item.getLeaveMonth(),
                     "remark", item.getRemark()));
         }
-        return resp(rows, page.getTotal(), businessTripSummary(businessTripMapper.selectListForQuery(req.getDepartment(), startTime)), leaveTripColumns());
+        return resp(rows, page.getTotal(), businessTripSummary(businessTripMapper.selectListForQuery(req.getDepartment(), startTime)), businessTripColumns());
     }
 
     private JijianQueryPageRespVO compensatoryLeavePage(JijianQueryPageReqVO req, LocalDateTime startTime) {
@@ -603,12 +604,29 @@ public class JijianActualTableQueryService {
 
     private Map<String, Object> businessTripSummary(List<BusinessTripDO> all) {
         Map<String, Object> m = base("BUSINESS_TRIP", all.size());
-        m.put("totalTripDays", sum(all, BusinessTripDO::getLeaveDays));
+        m.put("totalTripDays", sum(all, BusinessTripDO::getTripDays));
+        m.put("totalTripPeople", all.stream()
+                .map(BusinessTripDO::getTripPeopleCount)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum());
         m.put("byDepartment", group(all, i -> norm(i.getDepartment()), "department"));
-        m.put("byTripType", group(all, i -> norm(i.getLeaveType()), "tripType"));
-        m.put("byTripStatus", group(all, i -> norm(i.getLeaveStatus()), "tripStatus"));
-        m.put("outsideCount", all.stream().filter(i -> Boolean.TRUE.equals(i.getIsOutside())).count());
+        m.put("byDestination", group(all, i -> norm(i.getDestination()), "destination"));
+        m.put("outsideCount", all.stream().filter(i -> isBusinessTripOutside(i.getIsOutside())).count());
         return m;
+    }
+
+    private boolean isBusinessTripOutside(String value) {
+        return value != null && (value.contains("出义") || value.contains("外出") || value.contains("是"));
+    }
+
+    private LocalDateTime businessTripStart(BusinessTripDO item) {
+        return item.getStartDate() != null ? item.getStartDate()
+                : item.getStartTime() != null ? item.getStartTime() : item.getCreateTime();
+    }
+
+    private LocalDateTime businessTripEnd(BusinessTripDO item) {
+        return item.getEndDate() != null ? item.getEndDate() : item.getEndTime();
     }
 
     private Map<String, Object> compensatoryLeaveSummary(List<CompensatoryLeaveDO> all) {
@@ -695,6 +713,24 @@ public class JijianActualTableQueryService {
                 col("outsideLocation", "\u51fa\u4e49\u5730\u70b9", "text"),
                 col("leaveStatus", "\u72b6\u6001", "text"),
                 col("leaveMonth", "\u6240\u5c5e\u6708\u4efd", "text"),
+                col("remark", "\u5907\u6ce8", "text"));
+    }
+
+    private List<JijianQueryPageRespVO.ColumnDef> businessTripColumns() {
+        return columns(
+                col("department", "\u90e8\u95e8", "text"),
+                col("applicantName", "\u7533\u8bf7\u4eba", "text"),
+                col("employeeNo", "\u5458\u5de5\u7f16\u53f7", "text"),
+                col("tripReason", "\u51fa\u5dee\u4e8b\u7531", "text"),
+                col("departurePlace", "\u51fa\u53d1\u5730", "text"),
+                col("destination", "\u76ee\u7684\u5730", "text"),
+                col("startTime", "\u51fa\u5dee\u5f00\u59cb\u65f6\u95f4", "date"),
+                col("endTime", "\u51fa\u5dee\u7ed3\u675f\u65f6\u95f4", "date"),
+                col("tripDays", "\u51fa\u5dee\u5929\u6570", "number"),
+                col("tripPersonnel", "\u51fa\u5dee\u4eba\u5458", "text"),
+                col("tripPeopleCount", "\u51fa\u5dee\u4eba\u6570", "number"),
+                col("outside", "\u662f\u5426\u51fa\u4e49", "text"),
+                col("outsideLocation", "\u51fa\u4e49\u5730\u70b9", "text"),
                 col("remark", "\u5907\u6ce8", "text"));
     }
 

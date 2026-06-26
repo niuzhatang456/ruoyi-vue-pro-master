@@ -54,7 +54,7 @@ public class JijianProperties {
         /**
          * PDF 最多处理页数
          */
-        private int maxPdfPages = 3;
+        private int maxPdfPages = 5;
 
         /**
          * 后端启动时是否检测 OCR 服务可用性并输出日志

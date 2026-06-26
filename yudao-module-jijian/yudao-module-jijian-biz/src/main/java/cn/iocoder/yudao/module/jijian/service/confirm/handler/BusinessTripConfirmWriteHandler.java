@@ -101,6 +101,7 @@ public class BusinessTripConfirmWriteHandler extends AbstractConfirmWriteHandler
                 String departPlace   = get(row, "出发地", "出发地点", "起点");
                 String dest          = get(row, "目的地", "出差地点", "到达地", "终点", "出差目的地");
                 String tripPersonnel = get(row, "出差人员", "随行人员", "人员");
+                Integer tripPeopleCount = parsePeopleCount(get(row, "出差人数", "人数", "同行人数"), tripPersonnel);
                 String isOutside     = StrUtil.trimToNull(get(row, "是否出义", "出义", "是否外出", "外出"));
 
                 // 字段映射校验日志（警告，不中断写入）
@@ -122,6 +123,7 @@ public class BusinessTripConfirmWriteHandler extends AbstractConfirmWriteHandler
                         .endDate(endDate)
                         .tripDays(tripDays)
                         .tripPersonnel(tripPersonnel)
+                        .tripPeopleCount(tripPeopleCount)
                         .isOutside(isOutside)
                         .outsideLocation(get(row, "出义具体地点", "出义地点", "外出地点"))
                         .remark(get(row, "备注", "说明"))
@@ -160,9 +162,32 @@ public class BusinessTripConfirmWriteHandler extends AbstractConfirmWriteHandler
             result.add(toSummaryMap("申请人", d.getApplicantName(), "部门", d.getDepartment(),
                     "目的地", d.getDestination(), "出差事由", d.getTripReason(),
                     "天数", d.getTripDays() == null ? null : d.getTripDays().toPlainString(),
+                    "出差人数", d.getTripPeopleCount() == null ? null : String.valueOf(d.getTripPeopleCount()),
                     "记录ID", String.valueOf(d.getId())));
         }
         return result;
+    }
+
+    private Integer parsePeopleCount(String explicitCount, String tripPersonnel) {
+        if (StrUtil.isNotBlank(explicitCount)) {
+            try {
+                String digits = explicitCount.replaceAll("[^0-9]", "");
+                if (StrUtil.isNotBlank(digits)) {
+                    return Integer.parseInt(digits);
+                }
+            } catch (Exception ignored) {}
+        }
+        if (StrUtil.isBlank(tripPersonnel)) {
+            return null;
+        }
+        String normalized = tripPersonnel.replace("、", ",").replace("，", ",").replace(";", ",").replace("；", ",");
+        int count = 0;
+        for (String token : normalized.split(",")) {
+            if (StrUtil.isNotBlank(token)) {
+                count++;
+            }
+        }
+        return count > 0 ? count : null;
     }
 
     private LocalDateTime parseDateTime(String s, int rowNum, String fieldName) {

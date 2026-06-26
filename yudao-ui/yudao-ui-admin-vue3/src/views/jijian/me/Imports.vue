@@ -96,6 +96,7 @@ const handleDeleteBusinessData = async (record: ImportRecord) => {
   try {
     const result = await deleteBusinessData(parsedDataId)
     ElMessage.success(result.message || `已删除 ${result.deletedRows} 条数据`)
+    await loadRecords()
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   }

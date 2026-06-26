@@ -33,3 +33,6 @@ export const dragUploadCompensatoryLeave = buildUpload('/jijian/input/compensato
 
 /** 食堂供应商信息表 - 拖拽上传（服务端硬绑定 CANTEEN_SUPPLIER） */
 export const dragUploadCanteenSupplier = buildUpload('/jijian/input/canteen-supplier/drag-upload')
+
+/** 民生商品市场零售价格公告 - 拖拽上传（服务端硬绑定 CANTEEN_MARKET_PRICE） */
+export const dragUploadCanteenMarketPrice = buildUpload('/jijian/input/canteen-market-price/drag-upload')

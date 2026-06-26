@@ -24,5 +24,7 @@ public interface FormTypeConstants {
     String COMPENSATORY   = "调休记录";
     /** 食堂供应 */
     String CANTEEN        = "食堂供应";
+    /** 民生商品市场零售价格公告 */
+    String CANTEEN_MARKET_PRICE = "民生价格公告";
 
 }

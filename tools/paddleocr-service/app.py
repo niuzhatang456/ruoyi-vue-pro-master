@@ -27,7 +27,7 @@ from PIL import Image
 # ── FastAPI 应用 ─────────────────────────────────────────────────────────────
 app = FastAPI(title="PaddleOCR Local Service", version="1.1.0")
 
-MAX_PDF_PAGES = 3          # PDF 最多处理页数
+MAX_PDF_PAGES = 5          # PDF 最多处理页数
 ROW_Y_TOLERANCE = 18       # 同行 y 坐标容差（像素），可根据字号调整
 HEADER_SCAN_LIMIT = 15
 

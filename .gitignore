@@ -65,3 +65,8 @@ application-my.yaml
 
 ### Local outputs (generated files) ###
 /outputs/
+
+### Local assistant and backup files ###
+.claude/
+.codex/
+backup/
