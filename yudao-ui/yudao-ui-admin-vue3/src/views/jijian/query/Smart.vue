@@ -84,12 +84,6 @@
                   <el-tag :type="modeTagType(msg.aiMode)" size="small">{{ aiModeText(msg.aiMode) }}</el-tag>
                 </div>
 
-                <div class="msg-actions">
-                  <el-button size="small" type="primary" plain @click="handleDispose(msg, idx)">
-                    处置
-                  </el-button>
-                </div>
-
                 <!-- 指标卡片 -->
                 <el-row v-if="msg.metrics && msg.metrics.length" :gutter="12" class="result-metrics">
                   <el-col
@@ -167,7 +161,12 @@
 
                 <!-- 数据库原始数据（规则查询接口返回） -->
                 <div v-if="msg.pageResult?.list?.length" class="result-table raw-data-table">
-                  <div class="table-title">数据库原始数据</div>
+                  <div class="table-title table-title--actions">
+                    <span>数据库原始数据</span>
+                    <el-button size="small" type="primary" plain @click="handleDispose(msg, idx)">
+                      处置
+                    </el-button>
+                  </div>
                   <el-table :data="msg.pageResult.list" stripe size="small" max-height="300">
                     <el-table-column
                       v-for="col in msg.columns"
@@ -304,6 +303,8 @@ interface Conversation {
   messages: ChatMessage[]
   conversationId?: string
   serverHistoryId?: number
+  serverHistoryIds?: number[]
+  serverHistories?: QueryHistoryVO[]
 }
 
 // ===== 提示词示例 =====
@@ -382,18 +383,23 @@ const switchConversation = async (id: string) => {
   disposeCharts()
   currentConvId.value = id
   const conv = conversations.value.find((item) => item.id === id)
-  if (conv?.serverHistoryId && conv.messages.length === 0) {
-    const history = await QueryHistoryApi.get(conv.serverHistoryId)
-    conv.messages = historyToMessages(history)
+  if (conv && conv.messages.length === 0) {
+    if (conv.serverHistories?.length) {
+      conv.messages = historiesToMessages(conv.serverHistories)
+    } else if (conv.serverHistoryId) {
+      const history = await QueryHistoryApi.get(conv.serverHistoryId)
+      conv.messages = historyToMessages(history)
+    }
   }
   nextTick(() => scrollBottom())
 }
 
 const deleteConversation = async (id: string) => {
   const conv = conversations.value.find((item) => item.id === id)
-  if (conv?.serverHistoryId) {
+  if (conv?.serverHistoryId || conv?.serverHistoryIds?.length) {
     await ElMessageBox.confirm('确认删除这条查询历史吗？', '删除确认', { type: 'warning' })
-    await QueryHistoryApi.delete(conv.serverHistoryId)
+    const ids = conv.serverHistoryIds?.length ? conv.serverHistoryIds : [conv.serverHistoryId!]
+    await Promise.all(ids.map((historyId) => QueryHistoryApi.delete(historyId)))
   }
   if (currentConvId.value === id) {
     disposeCharts()
@@ -475,6 +481,9 @@ const sendMessage = async () => {
 
     conv.conversationId = resp.conversationId
     conv.serverHistoryId = resp.queryHistoryId
+    if (resp.queryHistoryId) {
+      conv.serverHistoryIds = Array.from(new Set([...(conv.serverHistoryIds || []), resp.queryHistoryId]))
+    }
 
     // 替换 loading 消息
     const idx = conv.messages.indexOf(loadingMsg)
@@ -559,23 +568,47 @@ const historyToMessages = (history: QueryHistoryVO): ChatMessage[] => {
   ]
 }
 
+const historiesToMessages = (histories: QueryHistoryVO[]): ChatMessage[] =>
+  [...histories]
+    .sort((a, b) => new Date(a.createTime).getTime() - new Date(b.createTime).getTime())
+    .flatMap(historyToMessages)
+
+const historyConversationId = (history: QueryHistoryVO) => {
+  const match = (history.remark || '').match(/conversationId=([^;\s]+)/)
+  return match?.[1] || `history-${history.id}`
+}
+
 const loadRemoteHistory = async () => {
   try {
     const page = await QueryHistoryApi.getPage({ pageNo: 1, pageSize: 30 })
     if (!page.list.length) return
-    conversations.value = page.list.map((item) => ({
-      id: `history-${item.id}`,
-      title: item.question.slice(0, 20),
-      createdAt: item.createTime,
-      messages: [],
-      serverHistoryId: item.id
-    }))
+    const grouped = new Map<string, QueryHistoryVO[]>()
+    page.list.forEach((item) => {
+      const key = historyConversationId(item)
+      grouped.set(key, [...(grouped.get(key) || []), item])
+    })
+    conversations.value = Array.from(grouped.entries()).map(([conversationId, items]) => {
+      const sorted = [...items].sort((a, b) => new Date(a.createTime).getTime() - new Date(b.createTime).getTime())
+      const latest = sorted[sorted.length - 1]
+      return {
+        id: `history-${conversationId}`,
+        title: sorted[0].question.slice(0, 20),
+        createdAt: latest.createTime,
+        messages: [],
+        conversationId,
+        serverHistoryId: latest.id,
+        serverHistoryIds: sorted.map((item) => item.id),
+        serverHistories: sorted
+      }
+    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     currentConvId.value = conversations.value[0]?.id || null
     if (currentConvId.value) {
       await switchConversation(currentConvId.value)
       const first = conversations.value[0]
-      if (first?.serverHistoryId && first.messages.length === 0) {
-        first.messages = historyToMessages(await QueryHistoryApi.get(first.serverHistoryId))
+      if (first && first.messages.length === 0) {
+        first.messages = first.serverHistories?.length
+          ? historiesToMessages(first.serverHistories)
+          : (first.serverHistoryId ? historyToMessages(await QueryHistoryApi.get(first.serverHistoryId)) : [])
       }
     }
   } catch {
@@ -992,12 +1025,6 @@ onUnmounted(() => disposeCharts())
   margin-bottom: 10px;
 }
 
-.msg-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 8px;
-}
-
 /* 指标卡片 */
 .result-metrics {
   margin-top: 12px;
@@ -1084,6 +1111,13 @@ onUnmounted(() => disposeCharts())
   font-weight: 600;
   color: var(--el-text-color-primary);
   margin-bottom: 6px;
+}
+
+.table-title--actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 /* 数据来源 */

@@ -38,7 +38,7 @@ public class JijianFormTypeAutoDetectService {
 
     /** 食堂供应强匹配字段组（每组任一别名命中即算该字段命中） */
     private static final List<List<String>> CANTEEN_STRONG_FIELDS = Arrays.asList(
-            Arrays.asList("商品名称", "品名", "物品名称", "项目名称"),
+            Arrays.asList("商品名称", "品名", "物品名称"),
             Arrays.asList("规格"),
             Arrays.asList("单位"),
             Arrays.asList("数量"),
@@ -46,8 +46,32 @@ public class JijianFormTypeAutoDetectService {
             Arrays.asList("小计"),
             Arrays.asList("备注"));
 
+    private static final List<List<String>> ATTENDANCE_DAILY_FIELDS = Arrays.asList(
+            Arrays.asList("姓名"),
+            Arrays.asList("员工编号", "工号"),
+            Arrays.asList("部门"),
+            Arrays.asList("日期", "考勤日期"),
+            Arrays.asList("星期"),
+            Arrays.asList("上班打卡时间", "打卡时间"),
+            Arrays.asList("上班打卡结果", "打卡结果"),
+            Arrays.asList("上班打卡地点", "打卡地点"),
+            Arrays.asList("上班备注"),
+            Arrays.asList("下班打卡时间"),
+            Arrays.asList("下班打卡结果"),
+            Arrays.asList("下班打卡地点"),
+            Arrays.asList("下班备注"));
+
+    private static final List<List<String>> MARKET_PRICE_STRONG_FIELDS = Arrays.asList(
+            Arrays.asList("项目名称"),
+            Arrays.asList("规格/等级", "规格、等级", "规格等级"),
+            Arrays.asList("单位"),
+            Arrays.asList("价格"),
+            Arrays.asList("采价点", "采价地点"));
+
     /** 食堂供应强匹配时直接给出的置信度（高于低置信度阈值，免去手工确认） */
     private static final double CANTEEN_STRONG_CONFIDENCE = 0.95;
+    private static final double ATTENDANCE_STRONG_CONFIDENCE = 0.95;
+    private static final double MARKET_PRICE_STRONG_CONFIDENCE = 0.98;
 
     // ── 公共 API ────────────────────────────────────────────────────────
 
@@ -69,15 +93,15 @@ public class JijianFormTypeAutoDetectService {
             scores.add(new CandidateScore(formType, rule.displayName, score, matchedHeaders(headers, rule)));
         }
 
+        if (isAttendanceDailyStrongMatch(headers)) {
+            boost(scores, FormTypeConstants.ATTENDANCE, ATTENDANCE_STRONG_CONFIDENCE);
+        }
+        if (isMarketPriceStrongMatch(fileName, sheetName, headers)) {
+            boost(scores, FormTypeConstants.CANTEEN_MARKET_PRICE, MARKET_PRICE_STRONG_CONFIDENCE);
+        }
         // 食堂供应强匹配：命中 7 个核心字段中至少 5 个，或同时命中 商品名称+数量+单价+小计
         if (isCanteenStrongMatch(headers)) {
-            for (int i = 0; i < scores.size(); i++) {
-                CandidateScore s = scores.get(i);
-                if (FormTypeConstants.CANTEEN.equals(s.formType) && s.confidence < CANTEEN_STRONG_CONFIDENCE) {
-                    scores.set(i, new CandidateScore(s.formType, s.displayName,
-                            CANTEEN_STRONG_CONFIDENCE, s.matchedHeaders));
-                }
-            }
+            boost(scores, FormTypeConstants.CANTEEN, CANTEEN_STRONG_CONFIDENCE);
         }
 
         // 按置信度降序排列
@@ -156,6 +180,7 @@ public class JijianFormTypeAutoDetectService {
      */
     private boolean isCanteenStrongMatch(List<String> headers) {
         if (headers == null || headers.isEmpty()) return false;
+        if (headersContain(headers, "采价点")) return false;
         int hits = 0;
         for (List<String> aliases : CANTEEN_STRONG_FIELDS) {
             for (String kw : aliases) {
@@ -172,6 +197,50 @@ public class JijianFormTypeAutoDetectService {
         }
         return hasName && headersContain(headers, "数量")
                 && headersContain(headers, "单价") && headersContain(headers, "小计");
+    }
+
+    private boolean isAttendanceDailyStrongMatch(List<String> headers) {
+        return countFieldGroupHits(headers, ATTENDANCE_DAILY_FIELDS) >= 7;
+    }
+
+    private boolean isMarketPriceStrongMatch(String fileName, String sheetName, List<String> headers) {
+        if (containsAny(fileName, "民生商品市场零售价格", "价格信息公告")
+                || containsAny(sheetName, "民生商品市场零售价格", "价格信息公告")) {
+            return true;
+        }
+        return countFieldGroupHits(headers, MARKET_PRICE_STRONG_FIELDS) >= 4
+                && headersContain(headers, "采价点");
+    }
+
+    private int countFieldGroupHits(List<String> headers, List<List<String>> groups) {
+        if (headers == null || headers.isEmpty()) return 0;
+        int hits = 0;
+        for (List<String> aliases : groups) {
+            for (String alias : aliases) {
+                if (headersContain(headers, alias)) {
+                    hits++;
+                    break;
+                }
+            }
+        }
+        return hits;
+    }
+
+    private void boost(List<CandidateScore> scores, String formType, double confidence) {
+        for (int i = 0; i < scores.size(); i++) {
+            CandidateScore s = scores.get(i);
+            if (formType.equals(s.formType) && s.confidence < confidence) {
+                scores.set(i, new CandidateScore(s.formType, s.displayName, confidence, s.matchedHeaders));
+            }
+        }
+    }
+
+    private boolean containsAny(String content, String... keywords) {
+        if (StrUtil.isBlank(content)) return false;
+        for (String kw : keywords) {
+            if (content.contains(kw)) return true;
+        }
+        return false;
     }
 
     private boolean headersContain(List<String> headers, String keyword) {
@@ -266,11 +335,19 @@ public class JijianFormTypeAutoDetectService {
                 Arrays.asList("出租方", "承租方", "合同期", "租金")
         ));
 
+        m.put(FormTypeConstants.CANTEEN_MARKET_PRICE, new FormTypeRule(
+                "民生价格公告",
+                Arrays.asList("民生商品市场零售价格", "价格信息公告"),
+                Arrays.asList("民生", "价格公告"),
+                Arrays.asList("项目名称", "规格/等级", "规格、等级", "价格", "采价点"),
+                Arrays.asList("单位", "日期", "公告年月")
+        ));
+
         m.put(FormTypeConstants.CANTEEN, new FormTypeRule(
                 "食堂供应",
                 Arrays.asList("食堂", "供应", "采购", "配送单", "食堂配送单", "供货"),
-                Arrays.asList("食堂", "供应", "采价", "配送"),
-                Arrays.asList("商品名称", "品名", "规格等级", "采购点", "采价点"),
+                Arrays.asList("食堂", "供应", "配送"),
+                Arrays.asList("商品名称", "品名", "物品名称", "数量", "单价", "小计"),
                 Arrays.asList("规格", "单位", "数量", "单价", "小计", "备注", "供应商", "供货商")
         ));
 

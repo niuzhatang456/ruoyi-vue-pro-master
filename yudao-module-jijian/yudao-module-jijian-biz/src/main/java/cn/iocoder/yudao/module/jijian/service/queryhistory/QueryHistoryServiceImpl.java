@@ -53,6 +53,9 @@ public class QueryHistoryServiceImpl implements QueryHistoryService {
         history.setModelName(respVO == null ? null : respVO.getAiMode());
         history.setSuccess(success);
         history.setErrorMessage(errorMessage);
+        if (respVO != null && respVO.getConversationId() != null) {
+            history.setRemark("conversationId=" + respVO.getConversationId());
+        }
         queryHistoryMapper.insert(history);
         createQueryAuditLog(history, respVO);
         return history.getId();

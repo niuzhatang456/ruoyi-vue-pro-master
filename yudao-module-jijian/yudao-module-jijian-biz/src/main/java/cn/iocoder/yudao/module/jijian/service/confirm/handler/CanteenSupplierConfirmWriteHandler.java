@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.jijian.dal.mysql.canteensupplier.CanteenSupplierM
 import cn.iocoder.yudao.module.jijian.enums.FormTypeConstants;
 import cn.iocoder.yudao.module.jijian.service.confirm.AbstractConfirmWriteHandler;
 import cn.iocoder.yudao.module.jijian.service.confirm.ConfirmWriteResult;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.stereotype.Component;
 import javax.annotation.Resource;
 import java.math.BigDecimal;
@@ -34,10 +35,17 @@ public class CanteenSupplierConfirmWriteHandler extends AbstractConfirmWriteHand
         List<Map<String, String>> rows = extractAllRows(parsedData);
         if (rows.isEmpty()) throw exception(PARSED_DATA_ROWS_EMPTY);
         List<Long> ids = new ArrayList<>();
-        for (Map<String, String> row : rows) {
+        List<String> skippedMessages = new ArrayList<>();
+        List<String> failedMessages = new ArrayList<>();
+        for (int i = 0; i < rows.size(); i++) {
+            Map<String, String> row = rows.get(i);
+            int rowNum = i + 1;
             // 物品名称：支持多种列名；空白行（小计/总计/签字行）直接跳过
             String itemName = get(row, "物品名称", "项目名称", "品名", "商品名称", "食材名称", "名称");
-            if (StrUtil.isBlank(itemName)) continue;
+            if (StrUtil.isBlank(itemName) || isSummaryRow(itemName)) {
+                if (skippedMessages.size() < 20) skippedMessages.add("第 " + rowNum + " 行：空白行或汇总行，已跳过");
+                continue;
+            }
 
             // 单价
             String priceStr = get(row, "单价", "价格", "含税单价");
@@ -55,6 +63,11 @@ public class CanteenSupplierConfirmWriteHandler extends AbstractConfirmWriteHand
             String supplierName = getExact(row, "供应商", "供货商", "供货单位", "配送单位", "供应单位");
             // 配送日期（由解析阶段注入）
             LocalDate supplyDate = parseLocalDate(get(row, "时间", "日期", "配送日期", "供应日期"));
+            if (existsSameBusinessData(itemName, specLevel, get(row, "单位", "计量单位"), quantity, price,
+                    subtotal, supplierName, supplyDate)) {
+                if (skippedMessages.size() < 20) skippedMessages.add("第 " + rowNum + " 行：数据库已存在相同食堂供应数据，已跳过");
+                continue;
+            }
 
             CanteenSupplierDO do_ = CanteenSupplierDO.builder()
                     .itemName(itemName)
@@ -72,8 +85,28 @@ public class CanteenSupplierConfirmWriteHandler extends AbstractConfirmWriteHand
             canteenSupplierMapper.insert(do_);
             ids.add(do_.getId());
         }
-        if (ids.isEmpty()) throw exception(PARSED_DATA_ROWS_EMPTY);
-        return ConfirmWriteResult.of(getFormType(), getBusinessTableName(), ids);
+        if (ids.isEmpty() && skippedMessages.isEmpty()) throw exception(PARSED_DATA_ROWS_EMPTY);
+        return ConfirmWriteResult.ofWithStats(getFormType(), getBusinessTableName(), ids,
+                rows.size(), skippedMessages.size(), skippedMessages, failedMessages.size(), failedMessages);
+    }
+
+    private boolean isSummaryRow(String value) {
+        return value.contains("合计") || value.contains("小计") || value.contains("汇总");
+    }
+
+    private boolean existsSameBusinessData(String itemName, String specLevel, String unit, BigDecimal quantity,
+                                           BigDecimal price, BigDecimal subtotal, String supplierName,
+                                           LocalDate supplyDate) {
+        LambdaQueryWrapper<CanteenSupplierDO> wrapper = new LambdaQueryWrapper<CanteenSupplierDO>()
+                .eq(CanteenSupplierDO::getItemName, itemName)
+                .eq(StrUtil.isNotBlank(specLevel), CanteenSupplierDO::getSpecLevel, specLevel)
+                .eq(StrUtil.isNotBlank(unit), CanteenSupplierDO::getUnit, unit)
+                .eq(quantity != null, CanteenSupplierDO::getQuantity, quantity)
+                .eq(price != null, CanteenSupplierDO::getPrice, price)
+                .eq(subtotal != null, CanteenSupplierDO::getSubtotal, subtotal)
+                .eq(StrUtil.isNotBlank(supplierName), CanteenSupplierDO::getSupplierName, supplierName)
+                .eq(supplyDate != null, CanteenSupplierDO::getSupplyDate, supplyDate);
+        return canteenSupplierMapper.selectCount(wrapper) > 0;
     }
 
     /** 精确列名匹配（trim 后 equals），不做子串模糊匹配 */

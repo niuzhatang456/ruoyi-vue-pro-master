@@ -32,7 +32,6 @@
           v-else
           type="danger"
           link
-          :disabled="row.status !== 'confirmed'"
           @click="emit('delete-business-data', row)"
         >删除导入数据</el-button>
       </template>

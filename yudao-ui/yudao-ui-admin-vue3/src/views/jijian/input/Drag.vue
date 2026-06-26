@@ -20,7 +20,7 @@
 
     <!-- 批量状态列表 -->
     <div v-if="fileResults.length > 0" class="mt-16px">
-      <el-table :data="fileResults" border size="small">
+      <el-table :data="fileResults" border size="small" @row-click="openPreview">
         <el-table-column type="index" label="#" width="50" />
         <el-table-column prop="fileName" label="文件名" min-width="160" show-overflow-tooltip />
         <el-table-column label="解析状态" width="100">
@@ -116,6 +116,20 @@
       <el-button type="primary" :loading="confirmingAll" @click="confirmAll">
         全部确认写入（{{ pendingCount }} 个）
       </el-button>
+    </div>
+
+    <!-- 解析成功后自动在页面下方展开预览 -->
+    <div v-if="inlinePreviewRow" class="mt-16px">
+      <el-divider content-position="left">预览：{{ inlinePreviewRow.fileName }}</el-divider>
+      <div v-if="inlinePreviewLoading" class="text-center py-24px">
+        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+        <div class="mt-8px text-gray-400">加载预览中…</div>
+      </div>
+      <ParsedDataPanel
+        v-else-if="inlinePreviewParsedData"
+        :parsed-data="inlinePreviewParsedData"
+        @confirmed="onInlinePanelConfirmed"
+      />
     </div>
 
     <!-- 预览/编辑/确认对话框 -->
@@ -349,6 +363,10 @@ async function uploadSingle(file: File) {
         row.totalRows = typeof pj.totalRows === 'number' ? pj.totalRows : pj.rows?.length
       } catch { /* ignore */ }
     }
+
+    if (row.status === 'success' && !row.needsConfirmation && row.parsedId) {
+      await showInlinePreview(row)
+    }
   } catch (err: unknown) {
     row.status = 'failed'
     row.errorMsg = err instanceof Error ? err.message : '上传失败'
@@ -404,17 +422,38 @@ const previewVisible    = ref(false)
 const previewRow        = ref<FileResult | null>(null)
 const previewParsedData = ref<ParsedData | null>(null)
 
-async function openPreview(row: FileResult) {
-  if (!row.parsedId) return
-  previewRow.value = row
-  previewParsedData.value = null
-  previewVisible.value = true
+const inlinePreviewRow        = ref<FileResult | null>(null)
+const inlinePreviewParsedData = ref<ParsedData | null>(null)
+const inlinePreviewLoading    = ref(false)
+
+async function showInlinePreview(row: FileResult) {
+  if (!row.importRecordId) return
+  inlinePreviewRow.value = row
+  inlinePreviewLoading.value = true
+  inlinePreviewParsedData.value = null
   try {
-    previewParsedData.value = await getParsedData(row.importRecordId as number) as unknown as ParsedData
+    inlinePreviewParsedData.value = await getParsedData(row.importRecordId) as unknown as ParsedData
   } catch (err: unknown) {
     ElMessage.error(err instanceof Error ? err.message : '加载预览失败')
-    previewVisible.value = false
+    inlinePreviewRow.value = null
+  } finally {
+    inlinePreviewLoading.value = false
   }
+}
+
+function onInlinePanelConfirmed(result: {
+  formType: string; businessTable?: string; confirmedIds: number[]; confirmedCount: number
+}) {
+  if (inlinePreviewRow.value) {
+    inlinePreviewRow.value.status = 'confirmed'
+    inlinePreviewRow.value.businessTable = result.businessTable || result.formType
+    inlinePreviewRow.value.businessIds = JSON.stringify(result.confirmedIds)
+  }
+}
+
+async function openPreview(row: FileResult) {
+  if (!row.parsedId) return
+  await showInlinePreview(row)
 }
 
 async function confirmFromPreview() {

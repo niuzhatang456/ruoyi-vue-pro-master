@@ -3,17 +3,20 @@ package cn.iocoder.yudao.module.jijian.controller.admin.importrecord;
 import cn.hutool.json.JSONUtil;
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.module.jijian.controller.admin.importrecord.vo.ImportRecordRespVO;
+import cn.iocoder.yudao.module.jijian.controller.admin.parseddata.vo.DeleteBusinessDataRespVO;
 import cn.iocoder.yudao.module.jijian.dal.dataobject.importrecord.ImportRecordDO;
 import cn.iocoder.yudao.module.jijian.dal.dataobject.parseddata.ParsedDataDO;
 import cn.iocoder.yudao.module.jijian.service.importrecord.ImportRecordService;
 import cn.iocoder.yudao.module.jijian.service.parseddata.JijianFormTypeAutoDetectService;
 import cn.iocoder.yudao.module.jijian.service.parseddata.ParsedDataService;
+import cn.iocoder.yudao.module.jijian.service.parseddata.ParsedDataService.DeleteBusinessDataResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.Data;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -248,6 +251,19 @@ public class ImportRecordController {
     @Parameter(name = "id", description = "Record id", required = true)
     public CommonResult<ImportRecordRespVO> getImportRecord(@PathVariable("id") Long id) {
         return success(convert(importRecordService.getImportRecord(id)));
+    }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "删除导入记录、解析记录及对应业务数据")
+    @PreAuthorize("@ss.hasPermission('jijian:import:delete')")
+    public CommonResult<DeleteBusinessDataRespVO> deleteImportRecord(@PathVariable("id") Long id) {
+        DeleteBusinessDataResult result = parsedDataService.deleteBusinessData(id);
+        DeleteBusinessDataRespVO respVO = new DeleteBusinessDataRespVO();
+        respVO.setParsedDataId(result.parsedDataId);
+        respVO.setBusinessTable(result.businessTable);
+        respVO.setDeletedRows(result.deletedRows);
+        respVO.setMessage(result.message);
+        return success(respVO);
     }
 
     private ImportRecordRespVO convert(ImportRecordDO record) {

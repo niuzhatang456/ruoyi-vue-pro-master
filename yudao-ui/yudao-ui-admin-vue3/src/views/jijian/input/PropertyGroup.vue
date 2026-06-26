@@ -4,6 +4,7 @@
     description="支持拖拽上传 Excel/CSV/图片/PDF，自动识别并录入：房产信息、租赁人员、租赁合同。"
     :allowed-form-types="PROPERTY_FORM_TYPES"
     alternative-hint="考勤情况入口或通用拖拽录入"
+    auto-preview-on-success
   />
 </template>
 

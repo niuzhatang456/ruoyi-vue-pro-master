@@ -21,7 +21,7 @@
 
     <!-- 文件列表 -->
     <div v-if="fileResults.length > 0" class="mt-16px">
-      <el-table :data="fileResults" border size="small">
+      <el-table :data="fileResults" border size="small" @row-click="openPreview">
         <el-table-column type="index" label="#" width="50" />
         <el-table-column prop="fileName" label="文件名" min-width="160" show-overflow-tooltip />
         <el-table-column label="解析状态" width="100">

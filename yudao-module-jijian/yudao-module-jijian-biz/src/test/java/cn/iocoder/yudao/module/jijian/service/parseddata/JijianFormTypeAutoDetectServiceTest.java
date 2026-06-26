@@ -50,6 +50,27 @@ class JijianFormTypeAutoDetectServiceTest {
     }
 
     @Test
+    void shouldAcceptAttendanceDailyWhenHalfHeadersMatched() {
+        JijianFormTypeAutoDetectService.DetectResult result = service.detect(
+                "日报.xlsx", "Sheet1",
+                Arrays.asList("姓名", "员工编号", "部门", "日期", "星期", "上班打卡时间", "上班打卡结果"));
+
+        assertEquals(FormTypeConstants.ATTENDANCE, result.detectedFormType);
+        assertTrue(result.confidence >= 0.7);
+        assertFalse(result.needsConfirmation);
+    }
+
+    @Test
+    void shouldPreferMarketPriceWhenPricePointHeaderExists() {
+        JijianFormTypeAutoDetectService.DetectResult result = service.detect(
+                "义乌市民生商品市场零售价格信息公告.xlsx", "Sheet1",
+                Arrays.asList("项目名称", "规格/等级", "单位", "价格", "采价点"));
+
+        assertEquals(FormTypeConstants.CANTEEN_MARKET_PRICE, result.detectedFormType);
+        assertNotEquals(FormTypeConstants.CANTEEN, result.detectedFormType);
+    }
+
+    @Test
     void shouldNotMatchCanteenWithoutHeaders() {
         JijianFormTypeAutoDetectService.DetectResult result = service.detect(
                 "random.txt", null, Collections.emptyList());

@@ -113,6 +113,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
     @Resource private JdbcTemplate                jdbcTemplate;
     @Resource private FileApi                     fileApi;
     @Resource private LeaseContractParseService   leaseContractParseService;
+    @Resource private JijianFormTypeAutoDetectService formTypeAutoDetectService;
 
     // ==================== 上传解析入口 ====================
 
@@ -124,16 +125,11 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             ParsedPayload payload;
             String formType;
 
-            if (shouldUseLeaseContractParser(fname, null, importRecord)) {
+            payload = parseGenericPayload(file, fname);
+            formType = detectFormType(payload, fname);
+            if (shouldUseLeaseContractParser(fname, payload.detectText, importRecord, formType)) {
                 payload = parseLeaseContract(file, fname);
                 formType = FormTypeConstants.LEASE_CONTRACT;
-            } else {
-                payload = parseGenericPayload(file, fname);
-                formType = detectFormType(payload.detectText);
-                if (shouldUseLeaseContractParser(fname, payload.detectText, importRecord)) {
-                    payload = parseLeaseContract(file, fname);
-                    formType = FormTypeConstants.LEASE_CONTRACT;
-                }
             }
 
             if (FormTypeConstants.ATTENDANCE.equals(formType)) {
@@ -386,6 +382,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             update.setConfirmedPropertyId(result.getConfirmedIds().get(0));
         }
         parsedDataMapper.updateById(update);
+        updateImportRecordStatus(parsedData.getImportRecordId(), formType, CONFIRM_STATUS_CONFIRMED);
         return result;
     }
 
@@ -1067,21 +1064,25 @@ public class ParsedDataServiceImpl implements ParsedDataService {
                 || fn.endsWith(".pdf");
     }
 
-    private boolean shouldUseLeaseContractParser(String fname, String text, ImportRecordDO importRecord) {
+    private boolean shouldUseLeaseContractParser(String fname, String text, ImportRecordDO importRecord,
+                                                 String currentFormType) {
         String detectedFormType = importRecord != null ? importRecord.getDetectedFormType() : null;
-        if (FormTypeConstants.LEASE_CONTRACT.equals(detectedFormType) || "合同管理".equals(detectedFormType)) {
+        if (FormTypeConstants.LEASE_CONTRACT.equals(detectedFormType)) {
             return true;
         }
-        if (isLikelyLeaseContractFile(fname)) {
+        if (StrUtil.isNotBlank(currentFormType) && !FormTypeConstants.LEASE_CONTRACT.equals(currentFormType)) {
+            return false;
+        }
+        if ((isExcel(fname) || isCsv(fname)) && !hasStrongLeaseContractSignals(text)) {
+            return false;
+        }
+        if (isImageOrPdf(fname) && isLikelyLeaseContractFile(fname)) {
             return true;
         }
         if (StrUtil.isBlank(text)) {
             return false;
         }
-        return containsAny(text, "房屋租赁合同", "租赁合同", "出租合同", "综合楼出租")
-                || (containsAny(text, "出租方", "甲方")
-                && containsAny(text, "承租方", "乙方")
-                && containsAny(text, "租赁期限", "租赁期", "房屋租金", "保证金"));
+        return hasStrongLeaseContractSignals(text);
     }
 
     private boolean isLikelyLeaseContractFile(String fn) {
@@ -1095,16 +1096,51 @@ public class ParsedDataServiceImpl implements ParsedDataService {
                 || fn.contains("lease_contract"));
     }
 
+    private boolean hasStrongLeaseContractSignals(String text) {
+        if (StrUtil.isBlank(text)) {
+            return false;
+        }
+        boolean hasLessor = containsAny(text, "出租方", "甲方");
+        boolean hasLessee = containsAny(text, "承租方", "乙方");
+        boolean hasPeriod = containsAny(text, "租赁期限", "租赁期", "租赁期自", "起至");
+        boolean hasRent = containsAny(text, "房屋租金", "年租金", "租金");
+        int score = 0;
+        if (containsAny(text, "房屋租赁合同", "租赁合同", "出租合同", "综合楼出租")) score++;
+        if (hasLessor) score++;
+        if (hasLessee) score++;
+        if (hasPeriod) score++;
+        if (hasRent) score++;
+        if (containsAny(text, "保证金", "押金")) score++;
+        if (containsAny(text, "签订日期", "合同签订日期", "签约日期")) score++;
+        return score >= 4 && hasLessor && hasLessee && (hasPeriod || hasRent);
+    }
+
     // ==================== 表单类型识别 ====================
+
+    @SuppressWarnings("unchecked")
+    private String detectFormType(ParsedPayload payload, String fileName) {
+        List<String> headers = Collections.emptyList();
+        String sheetName = null;
+        Object headersObj = payload.parsedData.get("headers");
+        if (headersObj instanceof List) {
+            headers = (List<String>) headersObj;
+        }
+        Object sheetObj = payload.parsedData.get("sheetName");
+        if (sheetObj != null) {
+            sheetName = sheetObj.toString();
+        }
+        JijianFormTypeAutoDetectService.DetectResult result =
+                formTypeAutoDetectService.detect(fileName, sheetName, headers);
+        if (StrUtil.isNotBlank(result.detectedFormType)) {
+            return result.detectedFormType;
+        }
+        return detectFormType(payload.detectText);
+    }
 
     private String detectFormType(String text) {
         if (StrUtil.isBlank(text)) return null;
         String c = text;
         if (containsAny(c, "营业执照", "是否内部人员", "身份证号", "联系电话")) return FormTypeConstants.LESSEE;
-        if (containsAny(c, "合同内容摘要", "租金", "水电费管理", "支付情况", "合同编号",
-                "合同管理", "房屋租赁合同", "出租合同", "出租方", "承租方", "租赁期限", "房屋租金")) {
-            return FormTypeConstants.LEASE_CONTRACT;
-        }
         if (containsAny(c, "疗养假", "疗休养", "休假地点", "参加工作时间", "工作年限")) return FormTypeConstants.LEAVE_HEALTH;
         if (containsAny(c, "调休", "加班开始", "调休开始", "调休时长", "补休")) return FormTypeConstants.COMPENSATORY;
         if (containsAny(c, "出差", "出差事由", "出差类型", "出差开始")) return FormTypeConstants.BUSINESS_TRIP;
@@ -1116,8 +1152,9 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             return FormTypeConstants.CANTEEN_MARKET_PRICE;
         }
         // 食堂：采价点/采购点/商品名称/配送单/供应商也作为识别依据
-        if (containsAny(c, "食堂", "食堂配送单", "物品名称", "商品名称", "项目名称", "规格等级", "规格、等级",
-                         "采购点", "采价点", "采购地点", "配送单", "供应商", "供货商", "单价", "价格")) return FormTypeConstants.CANTEEN;
+        if (containsAny(c, "食堂", "食堂配送单", "物品名称", "商品名称",
+                         "采购点", "采购地点", "配送单", "供应商", "供货商", "单价", "小计")) return FormTypeConstants.CANTEEN;
+        if (hasStrongLeaseContractSignals(c)) return FormTypeConstants.LEASE_CONTRACT;
         if (containsAny(c, "房产", "不动产", "产权", "建筑面积", "房产地址", "租赁情况")) return FormTypeConstants.PROPERTY;
         if (containsAny(c, "地址", "面积")) return FormTypeConstants.PROPERTY;
         return null;
@@ -1279,6 +1316,17 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         importRecord.setDetectedFormType(StrUtil.blankToDefault(detectedFormType, "未知类型"));
         importRecord.setStatus(status);
         importRecordMapper.updateById(importRecord);
+    }
+
+    private void updateImportRecordStatus(Long importRecordId, String detectedFormType, String status) {
+        if (importRecordId == null) {
+            return;
+        }
+        ImportRecordDO update = new ImportRecordDO();
+        update.setId(importRecordId);
+        update.setDetectedFormType(StrUtil.blankToDefault(detectedFormType, "未知类型"));
+        update.setStatus(status);
+        importRecordMapper.updateById(update);
     }
 
     private Long parseLong(String s) {

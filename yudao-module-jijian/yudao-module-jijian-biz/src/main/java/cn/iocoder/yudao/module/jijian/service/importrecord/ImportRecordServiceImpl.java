@@ -28,7 +28,7 @@ public class ImportRecordServiceImpl implements ImportRecordService {
         ImportRecordDO record = ImportRecordDO.builder()
                 .fileName(StrUtil.blankToDefault(fileName, "未命名文件"))
                 .sourceType(normalizedSourceType)
-                .detectedFormType(mockDetectedFormType(normalizedSourceType))
+                .detectedFormType("未知类型")
                 .status("processing")
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -51,16 +51,6 @@ public class ImportRecordServiceImpl implements ImportRecordService {
     @Override
     public ImportRecordDO getImportRecord(Long id) {
         return importRecordMapper.selectById(id);
-    }
-
-    private String mockDetectedFormType(String sourceType) {
-        if (SOURCE_TYPE_EXCEL.equals(sourceType)) {
-            return "考勤信息";
-        }
-        if (SOURCE_TYPE_DRAG.equals(sourceType)) {
-            return System.currentTimeMillis() % 2 == 0 ? "合同管理" : "报销信息";
-        }
-        return "房产信息";
     }
 
 }

@@ -801,7 +801,23 @@ async function handleConfirm() {
 }
 .confirm-area { min-height: 36px; }
 .action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.table-wrapper { overflow-x: auto; max-height: 78vh; overflow-y: auto; }
+.table-wrapper {
+  position: relative;
+  overflow: auto;
+  max-height: 70vh;
+  padding-bottom: 10px;
+  scrollbar-gutter: stable both-edges;
+}
+.table-wrapper :deep(.el-scrollbar__bar.is-horizontal) {
+  position: sticky !important;
+  bottom: 0;
+  display: block !important;
+  opacity: 1 !important;
+  z-index: 4;
+}
+.table-wrapper :deep(.el-table__body-wrapper) {
+  overflow-x: auto;
+}
 .correction-table { width: 100%; }
 .correction-table :deep(.cell) {
   white-space: normal;

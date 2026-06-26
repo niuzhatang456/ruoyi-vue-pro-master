@@ -86,6 +86,12 @@ export const getImportRecord = async (id: number) => {
   return await request.get<ImportRecordVO>({ url: `/jijian/import/${id}` })
 }
 
+export const deleteImportRecord = async (id: number | string) => {
+  return await request.delete<DeleteBusinessDataVO>({
+    url: `/jijian/import/${id}`
+  })
+}
+
 export const getParsedData = async (importRecordId: number | string) => {
   return await request.get<ParsedDataVO>({ url: `/jijian/import/parsed/${importRecordId}` })
 }
