@@ -328,6 +328,7 @@ const confirmingAll = ref(false)
 const fileResults   = ref<FileResult[]>([])
 let uploadTimer: ReturnType<typeof setTimeout> | undefined
 const previewCache = new Map<number, ParsedData>()
+const AUTO_PREVIEW_ROW_LIMIT = 100
 
 // ── 计算属性 ──────────────────────────────────────────────────────────────────
 
@@ -419,7 +420,8 @@ async function uploadSingle(file: File) {
 
     // 解析成功且在入口范围内：自动在页面下方展开预览
     if (props.autoPreviewOnSuccess && row.status === 'success'
-        && !row.needsConfirmation && !row.outOfScope && row.parsedId && !inlinePreviewRow.value) {
+        && !row.needsConfirmation && !row.outOfScope && row.parsedId && !inlinePreviewRow.value
+        && (row.totalRows ?? 0) <= AUTO_PREVIEW_ROW_LIMIT) {
       await showInlinePreview(row)
     }
   } catch (err: unknown) {

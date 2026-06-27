@@ -197,7 +197,7 @@
                   v-if="canConfirm"
                   v-model="row[header]"
                   type="textarea"
-                  :autosize="{ minRows: 1, maxRows: 4 }"
+                  :autosize="{ minRows: 1 }"
                   resize="none"
                   class="cell-editor"
                   size="small"
@@ -216,6 +216,9 @@
 
         <!-- 分页控件（数据量 > PAGE_SIZE 时显示） -->
         <div v-if="isLargeData" class="pagination-bar mt-8px">
+          <el-button v-if="hasNextPreviewPage" size="small" plain @click="loadNextPreviewPage">
+            加载下一页
+          </el-button>
           <el-pagination
             v-model:current-page="currentPage"
             :page-size="PAGE_SIZE"
@@ -275,7 +278,7 @@ type LeaseRentItem = {
 
 // ── 常量 ────────────────────────────────────────────────────────────────────
 /** 每页展示行数（Vue 响应式对象上限）。超过此值时启用分页预览。 */
-const PAGE_SIZE = 200
+const PAGE_SIZE = 100
 /** 超过此行数时才显示大数据提示和分页控件 */
 const LARGE_DATA_THRESHOLD = PAGE_SIZE
 
@@ -351,6 +354,8 @@ const parsedNotice = computed<string>(() => {
 })
 const pageStart    = computed(() => (currentPage.value - 1) * PAGE_SIZE)
 const pageEnd      = computed(() => Math.min(currentPage.value * PAGE_SIZE, totalRowCount.value))
+const totalPages   = computed(() => Math.max(1, Math.ceil(totalRowCount.value / PAGE_SIZE)))
+const hasNextPreviewPage = computed(() => currentPage.value < totalPages.value)
 
 const isConfirmed = computed(() =>
   props.parsedData?.confirmStatus === 'confirmed' ||
@@ -635,6 +640,11 @@ function onPageChange(page: number) {
   loadPage(page)
 }
 
+function loadNextPreviewPage() {
+  if (!hasNextPreviewPage.value) return
+  onPageChange(currentPage.value + 1)
+}
+
 function getColumnMinWidth(header: string) {
   if (/房屋租金|租金交纳日期/.test(header)) return 300
   if (/房屋状况|备注|原始|OCR/.test(header)) return 360
@@ -820,6 +830,9 @@ async function handleConfirm() {
   overflow-x: auto;
 }
 .correction-table { width: 100%; }
+.correction-table :deep(.el-table__cell) {
+  vertical-align: top;
+}
 .correction-table :deep(.cell) {
   white-space: normal;
   overflow: visible;
@@ -830,6 +843,7 @@ async function handleConfirm() {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.45;
+  overflow: hidden !important;
 }
 .cell-text {
   display: inline-block;

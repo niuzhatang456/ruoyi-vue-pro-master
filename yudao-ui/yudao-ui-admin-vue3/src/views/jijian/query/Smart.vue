@@ -124,41 +124,6 @@
                   </div>
                 </div>
 
-                <!-- 数据表格 -->
-                <div v-if="msg.tables && msg.tables.length">
-                  <div v-for="(tbl, ti) in msg.tables" :key="ti" class="result-table">
-                    <div class="table-title">{{ tbl.title }}</div>
-                    <el-table :data="tbl.rows" stripe size="small" max-height="300">
-                      <el-table-column
-                        v-for="col in tbl.columns"
-                        :key="col.key"
-                        :prop="col.key"
-                        :label="col.label"
-                        min-width="100"
-                        show-overflow-tooltip
-                      />
-                      <el-table-column
-                        v-if="hasContractOriginalRows(tbl.rows)"
-                        label="合同原件"
-                        width="120"
-                        fixed="right"
-                      >
-                        <template #default="{ row }">
-                          <el-button
-                            v-if="getContractOriginalUrl(row)"
-                            type="primary"
-                            size="small"
-                            link
-                            @click="openContractOriginal(row)"
-                          >
-                            查看合同原件
-                          </el-button>
-                        </template>
-                      </el-table-column>
-                    </el-table>
-                  </div>
-                </div>
-
                 <!-- 数据来源元信息 -->
                 <div v-if="msg.databaseContextMeta" class="db-meta">
                   <span>数据来源：本地数据库只读查询</span>

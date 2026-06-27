@@ -1076,7 +1076,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             return true;
         }
         if (StrUtil.isNotBlank(currentFormType) && !FormTypeConstants.LEASE_CONTRACT.equals(currentFormType)) {
-            return false;
+            return isPropertyFamilyFormType(currentFormType) && hasStrongLeaseContractSignals(text);
         }
         if ((isExcel(fname) || isCsv(fname)) && !hasStrongLeaseContractSignals(text)) {
             return false;
@@ -1101,16 +1101,31 @@ public class ParsedDataServiceImpl implements ParsedDataService {
                 || fn.contains("lease_contract"));
     }
 
+    private boolean isPropertyFamilyFormType(String formType) {
+        return FormTypeConstants.PROPERTY.equals(formType)
+                || FormTypeConstants.LESSEE.equals(formType)
+                || FormTypeConstants.LEASE_CONTRACT.equals(formType);
+    }
+
     private boolean hasStrongLeaseContractSignals(String text) {
         if (StrUtil.isBlank(text)) {
             return false;
         }
-        boolean hasTitle = containsAny(text, "房屋租赁合同", "租赁合同", "出租合同", "租房合同");
-        boolean hasLessor = containsAny(text, "出租方", "甲方", "出租人", "房东");
-        boolean hasLessee = containsAny(text, "承租方", "乙方", "承租人", "租赁方");
-        boolean hasPeriod = containsAny(text, "租赁期限", "租赁期", "租赁期自", "起至", "租期");
-        boolean hasRent = containsAny(text, "房屋租金", "年租金", "月租金", "租金");
-        boolean hasHouse = containsAny(text, "房屋座落", "房屋坐落", "坐落于", "座落于", "房屋状况", "租赁房屋");
+        boolean hasTitle = containsAny(text, "房屋租赁合同", "房屋出租合同", "租赁合同", "租赁合同书",
+                "租赁协议", "租赁协议书", "出租合同", "租房合同", "房屋租赁协议");
+        boolean hasLessor = containsAny(text, "出租方", "甲方", "出租人", "出租单位", "出借方", "房东");
+        boolean hasLessee = containsAny(text, "承租方", "乙方", "承租人", "承租单位", "租赁方");
+        boolean hasPeriod = containsAny(text, "租赁期限", "租赁期", "租赁期自", "租赁时间", "租赁起止",
+                "起租日期", "止租日期", "起至", "租期");
+        boolean hasRent = containsAny(text, "房屋租金", "年租金", "月租金", "租金", "租赁费",
+                "租赁费用", "租金标准", "租金总额");
+        boolean hasHouse = containsAny(text, "房屋座落", "房屋坐落", "坐落于", "座落于", "坐落", "座落",
+                "房屋状况", "租赁房屋", "租赁物", "租赁场地", "房屋地址", "物业地址");
+        boolean hasDeposit = containsAny(text, "保证金", "押金", "履约保证金");
+        boolean hasSignDate = containsAny(text, "签订日期", "合同签订日期", "签约日期", "签署日期",
+                "签订时间", "合同签署");
+        boolean hasSignature = containsAny(text, "甲方签章", "乙方签章", "甲方（盖章）", "乙方（盖章）",
+                "签字盖章", "双方签字");
         int score = 0;
         if (hasTitle || containsAny(text, "综合楼出租")) score += 2;
         if (hasLessor) score++;
@@ -1118,11 +1133,21 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         if (hasPeriod) score++;
         if (hasRent) score++;
         if (hasHouse) score++;
-        if (containsAny(text, "保证金", "押金")) score++;
-        if (containsAny(text, "签订日期", "合同签订日期", "签约日期")) score++;
-        return score >= 4
-                && (hasTitle || (hasLessor && hasLessee))
-                && (hasPeriod || hasRent || hasHouse);
+        if (hasDeposit) score++;
+        if (hasSignDate) score++;
+        if (hasSignature) score++;
+
+        int businessCoreCount = 0;
+        if (hasPeriod) businessCoreCount++;
+        if (hasRent) businessCoreCount++;
+        if (hasHouse) businessCoreCount++;
+        if (hasDeposit) businessCoreCount++;
+        if (hasSignDate) businessCoreCount++;
+        boolean hasBothParties = hasLessor && hasLessee;
+        return score >= 5
+                && (hasTitle || hasBothParties)
+                && (hasBothParties || businessCoreCount >= 3)
+                && businessCoreCount >= 2;
     }
 
     // ==================== 表单类型识别 ====================
@@ -1150,6 +1175,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
     private String detectFormType(String text) {
         if (StrUtil.isBlank(text)) return null;
         String c = text;
+        if (hasStrongLeaseContractSignals(c)) return FormTypeConstants.LEASE_CONTRACT;
         if (containsAny(c, "营业执照", "是否内部人员", "身份证号", "联系电话")) return FormTypeConstants.LESSEE;
         if (containsAny(c, "疗养假", "疗休养", "休假地点", "参加工作时间", "工作年限")) return FormTypeConstants.LEAVE_HEALTH;
         if (containsAny(c, "调休", "加班开始", "调休开始", "调休时长", "补休")) return FormTypeConstants.COMPENSATORY;
@@ -1164,7 +1190,6 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         // 食堂：采价点/采购点/商品名称/配送单/供应商也作为识别依据
         if (containsAny(c, "食堂", "食堂配送单", "物品名称", "商品名称",
                          "采购点", "采购地点", "配送单", "供应商", "供货商", "单价", "小计")) return FormTypeConstants.CANTEEN;
-        if (hasStrongLeaseContractSignals(c)) return FormTypeConstants.LEASE_CONTRACT;
         if (containsAny(c, "房产", "不动产", "产权", "建筑面积", "房产地址", "租赁情况")) return FormTypeConstants.PROPERTY;
         if (containsAny(c, "地址", "面积")) return FormTypeConstants.PROPERTY;
         return null;
