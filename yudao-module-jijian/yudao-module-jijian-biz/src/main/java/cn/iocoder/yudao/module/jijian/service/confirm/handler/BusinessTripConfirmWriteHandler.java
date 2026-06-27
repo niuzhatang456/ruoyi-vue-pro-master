@@ -58,6 +58,7 @@ public class BusinessTripConfirmWriteHandler extends AbstractConfirmWriteHandler
         List<Long> ids = new ArrayList<>(rows.size());
         List<String> failedMessages = new ArrayList<>();
         List<String> skippedMessages = new ArrayList<>();
+        int skippedCount = 0;
 
         for (int i = 0; i < rows.size(); i++) {
             Map<String, String> row = rows.get(i);
@@ -69,6 +70,7 @@ public class BusinessTripConfirmWriteHandler extends AbstractConfirmWriteHandler
                     if (StrUtil.isNotBlank(biz)) {
                         if (failedMessages.size() < 20) failedMessages.add("第 " + rowNum + " 行：申请人为空但存在业务字段");
                     } else {
+                        skippedCount++;
                         if (skippedMessages.size() < 20) skippedMessages.add("第 " + rowNum + " 行：空白行，已跳过");
                     }
                     continue;
@@ -149,9 +151,9 @@ public class BusinessTripConfirmWriteHandler extends AbstractConfirmWriteHandler
         }
 
         log.info("[BusinessTripConfirmWrite] 总行={} 成功={} 跳过={} 失败={}",
-                rows.size(), ids.size(), skippedMessages.size(), failedMessages.size());
+                rows.size(), ids.size(), skippedCount, failedMessages.size());
         return ConfirmWriteResult.ofWithStats(getFormType(), getBusinessTableName(), ids,
-                rows.size(), skippedMessages.size(), skippedMessages, failedMessages.size(), failedMessages);
+                rows.size(), skippedCount, skippedMessages, failedMessages.size(), failedMessages);
     }
 
     @Override

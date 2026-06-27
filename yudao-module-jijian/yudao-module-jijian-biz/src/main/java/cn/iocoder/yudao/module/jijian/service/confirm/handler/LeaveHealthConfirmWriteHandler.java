@@ -55,6 +55,7 @@ public class LeaveHealthConfirmWriteHandler extends AbstractConfirmWriteHandler 
         List<Long> ids = new ArrayList<>(rows.size());
         List<String> failedMessages = new ArrayList<>();
         List<String> skippedMessages = new ArrayList<>();
+        int skippedCount = 0;
 
         for (int i = 0; i < rows.size(); i++) {
             Map<String, String> row = rows.get(i);
@@ -73,6 +74,7 @@ public class LeaveHealthConfirmWriteHandler extends AbstractConfirmWriteHandler 
                         }
                         log.warn("[LeaveHealthConfirmWrite] 第 {} 行：有业务字段但姓名为空，行摘要：{}", rowNum, rowSummary(row));
                     } else {
+                        skippedCount++;
                         if (skippedMessages.size() < 20) {
                             skippedMessages.add("第 " + rowNum + " 行：空白行或合计行，已跳过");
                         }
@@ -127,11 +129,11 @@ public class LeaveHealthConfirmWriteHandler extends AbstractConfirmWriteHandler 
         }
 
         log.info("[LeaveHealthConfirmWrite] 写入完成：总行={} 成功={} 跳过={} 失败={}",
-                rows.size(), ids.size(), skippedMessages.size(), failedMessages.size());
+                rows.size(), ids.size(), skippedCount, failedMessages.size());
 
         return ConfirmWriteResult.ofWithStats(
                 getFormType(), getBusinessTableName(), ids,
-                rows.size(), skippedMessages.size(), skippedMessages,
+                rows.size(), skippedCount, skippedMessages,
                 failedMessages.size(), failedMessages);
     }
 

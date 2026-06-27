@@ -12,6 +12,7 @@ import cn.iocoder.yudao.module.jijian.service.confirm.AbstractConfirmWriteHandle
 import cn.iocoder.yudao.module.jijian.service.confirm.ConfirmWriteResult;
 import cn.iocoder.yudao.module.jijian.service.parseddata.LeaseContractParseService;
 import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.stereotype.Component;
 import javax.annotation.Resource;
 import java.time.LocalDate;
@@ -43,11 +44,13 @@ public class LeaseContractConfirmWriteHandler extends AbstractConfirmWriteHandle
         List<Map<String, String>> rows = extractAllRows(parsedData);
         if (rows.isEmpty()) throw exception(PARSED_DATA_ROWS_EMPTY);
         Set<String> dedupKeys = new LinkedHashSet<>();
-        for (LeaseContractDO existing : leaseContractMapper.selectListBySourceParsedDataId(parsedData.getId())) {
-            dedupKeys.add(dedupKey(existing));
-        }
         List<Long> ids = new ArrayList<>();
-        for (Map<String, String> row : rows) {
+        List<String> skippedMessages = new ArrayList<>();
+        List<String> failedMessages = new ArrayList<>();
+        int skippedCount = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            Map<String, String> row = rows.get(i);
+            int rowNum = i + 1;
             LocalDate signDate = parseDate(get(row, "合同签订日期", "合同时间", "合同签订时间", "签订时间", "签订日期"));
             LocalDate leaseStartDate = parseDate(get(row, "租赁开始时间", "合同开始时间", "合同开始日期", "开始时间", "起租时间"));
             LocalDate leaseEndDate = parseDate(get(row, "租赁结束时间", "合同结束时间", "合同结束日期", "结束时间", "到期时间"));
@@ -90,11 +93,18 @@ public class LeaseContractConfirmWriteHandler extends AbstractConfirmWriteHandle
                             LeaseContractParseService.META_PARSE_ERROR_MSG, "parseErrorMsg"))
                     .sourceParsedDataId(parsedData.getId())
                     .build();
-            if (!dedupKeys.add(dedupKey(do_))) continue; // 重复数据跳过
+            if (!dedupKeys.add(dedupKey(do_)) || existsSameBusinessData(do_)) {
+                skippedCount++;
+                if (skippedMessages.size() < 20) {
+                    skippedMessages.add("第 " + rowNum + " 行：数据库已存在相同租赁合同数据，已跳过");
+                }
+                continue;
+            }
             leaseContractMapper.insert(do_);
             ids.add(do_.getId());
         }
-        return ConfirmWriteResult.of(getFormType(), getBusinessTableName(), ids);
+        return ConfirmWriteResult.ofWithStats(getFormType(), getBusinessTableName(), ids,
+                rows.size(), skippedCount, skippedMessages, failedMessages.size(), failedMessages);
     }
 
     private String dedupKey(LeaseContractDO value) {
@@ -103,6 +113,16 @@ public class LeaseContractConfirmWriteHandler extends AbstractConfirmWriteHandle
                 + StrUtil.blankToDefault(value.getLesseeName(), "") + "|"
                 + (value.getLeaseStartDate() == null ? "" : value.getLeaseStartDate()) + "|"
                 + (value.getLeaseEndDate() == null ? "" : value.getLeaseEndDate());
+    }
+
+    private boolean existsSameBusinessData(LeaseContractDO value) {
+        LambdaQueryWrapper<LeaseContractDO> wrapper = new LambdaQueryWrapper<LeaseContractDO>()
+                .eq(StrUtil.isNotBlank(value.getContractNo()), LeaseContractDO::getContractNo, value.getContractNo())
+                .eq(StrUtil.isNotBlank(value.getLessorName()), LeaseContractDO::getLessorName, value.getLessorName())
+                .eq(StrUtil.isNotBlank(value.getLesseeName()), LeaseContractDO::getLesseeName, value.getLesseeName())
+                .eq(value.getLeaseStartDate() != null, LeaseContractDO::getLeaseStartDate, value.getLeaseStartDate())
+                .eq(value.getLeaseEndDate() != null, LeaseContractDO::getLeaseEndDate, value.getLeaseEndDate());
+        return leaseContractMapper.selectCount(wrapper) > 0;
     }
 
     @Override

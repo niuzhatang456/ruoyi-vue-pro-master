@@ -125,11 +125,16 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             ParsedPayload payload;
             String formType;
 
-            payload = parseGenericPayload(file, fname);
-            formType = detectFormType(payload, fname);
-            if (shouldUseLeaseContractParser(fname, payload.detectText, importRecord, formType)) {
+            if (isImageOrPdf(fname) && isLikelyLeaseContractFile(fname)) {
                 payload = parseLeaseContract(file, fname);
                 formType = FormTypeConstants.LEASE_CONTRACT;
+            } else {
+                payload = parseGenericPayload(file, fname);
+                formType = detectFormType(payload, fname);
+                if (shouldUseLeaseContractParser(fname, payload.detectText, importRecord, formType)) {
+                    payload = parseLeaseContract(file, fname);
+                    formType = FormTypeConstants.LEASE_CONTRACT;
+                }
             }
 
             if (FormTypeConstants.ATTENDANCE.equals(formType)) {

@@ -73,9 +73,9 @@ const remainingRouter: AppRouteRecordRaw[] = [
     ]
   },
   {
-    path: '/input',
+    path: '/jijian/input',
     component: Layout,
-    redirect: '/input/drag',
+    redirect: '/jijian/input/drag',
     name: 'JijianInput',
     meta: {
       title: '录入数据',
@@ -91,16 +91,34 @@ const remainingRouter: AppRouteRecordRaw[] = [
         meta: { title: '拖拽录入', icon: 'ep:folder-add' }
       },
       {
+        path: 'property',
+        component: () => import('@/views/jijian/input/PropertyGroup.vue'),
+        name: 'JijianInputProperty',
+        meta: { title: '房产情况', icon: 'ep:office-building', hidden: true }
+      },
+      {
         path: 'property-group',
         component: () => import('@/views/jijian/input/PropertyGroup.vue'),
         name: 'JijianInputPropertyGroup',
         meta: { title: '房产情况', icon: 'ep:office-building' }
       },
       {
+        path: 'attendance',
+        component: () => import('@/views/jijian/input/AttendanceGroup.vue'),
+        name: 'JijianInputAttendance',
+        meta: { title: '考勤情况', icon: 'ep:calendar', hidden: true }
+      },
+      {
         path: 'attendance-group',
         component: () => import('@/views/jijian/input/AttendanceGroup.vue'),
         name: 'JijianInputAttendanceGroup',
         meta: { title: '考勤情况', icon: 'ep:calendar' }
+      },
+      {
+        path: 'canteen',
+        component: () => import('@/views/jijian/input/CanteenSupplier.vue'),
+        name: 'JijianInputCanteen',
+        meta: { title: '食堂供应', icon: 'ep:food', hidden: true }
       },
       {
         path: 'canteen-supplier',
@@ -172,9 +190,9 @@ const remainingRouter: AppRouteRecordRaw[] = [
     ]
   },
   {
-    path: '/query',
+    path: '/jijian/query',
     component: Layout,
-    redirect: '/query/smart',
+    redirect: '/jijian/query/smart',
     name: 'JijianQuery',
     meta: {
       title: '查询信息',
@@ -183,6 +201,16 @@ const remainingRouter: AppRouteRecordRaw[] = [
     },
     children: [
       {
+        path: 'index',
+        component: () => import('@/views/jijian/query/Smart.vue'),
+        name: 'JijianQueryIndex',
+        meta: {
+          title: '智能AI查询',
+          icon: 'ep:chat-dot-round',
+          hidden: true
+        }
+      },
+      {
         path: 'smart',
         component: () => import('@/views/jijian/query/Smart.vue'),
         name: 'JijianQuerySmart',
@@ -190,13 +218,23 @@ const remainingRouter: AppRouteRecordRaw[] = [
           title: '智能AI查询',
           icon: 'ep:chat-dot-round'
         }
+      },
+      {
+        path: 'history',
+        component: () => import('@/views/jijian/me/History.vue'),
+        name: 'JijianQueryHistory',
+        meta: {
+          title: '历史查询对话',
+          icon: 'ep:clock',
+          hidden: true
+        }
       }
     ]
   },
   {
-    path: '/me',
+    path: '/jijian/me',
     component: Layout,
-    redirect: '/me/history',
+    redirect: '/jijian/me/history',
     name: 'JijianMe',
     meta: {
       title: '我的',
@@ -223,6 +261,16 @@ const remainingRouter: AppRouteRecordRaw[] = [
         }
       },
       {
+        path: 'profile',
+        component: () => import('@/views/jijian/me/Account.vue'),
+        name: 'JijianMeProfile',
+        meta: {
+          title: '当前账号信息',
+          icon: 'ep:user-filled',
+          hidden: true
+        }
+      },
+      {
         path: 'account',
         component: () => import('@/views/jijian/me/Account.vue'),
         name: 'JijianMeAccount',
@@ -238,6 +286,62 @@ const remainingRouter: AppRouteRecordRaw[] = [
         meta: {
           title: '最近导入记录',
           icon: 'ep:files'
+        }
+      }
+    ]
+  },
+  {
+    path: '/jijian/disposal',
+    component: Layout,
+    redirect: '/jijian/disposal/record',
+    name: 'JijianDisposal',
+    meta: {
+      title: '处置记录',
+      icon: 'ep:document-checked',
+      hidden: true
+    },
+    children: [
+      {
+        path: 'record',
+        component: () => import('@/views/jijian/me/Disposal.vue'),
+        name: 'JijianDisposalRecord',
+        meta: {
+          title: '处置记录',
+          icon: 'ep:document-checked',
+          hidden: true
+        }
+      }
+    ]
+  },
+  {
+    path: '/jijian/my',
+    component: Layout,
+    redirect: '/jijian/my/profile',
+    name: 'JijianMyAlias',
+    meta: {
+      title: '我的',
+      icon: 'ep:user',
+      hidden: true
+    },
+    children: [
+      {
+        path: 'profile',
+        component: () => import('@/views/jijian/me/Account.vue'),
+        name: 'JijianMyProfileAlias',
+        meta: {
+          title: '当前账号信息',
+          icon: 'ep:user-filled',
+          hidden: true
+        }
+      },
+      {
+        path: 'imports',
+        component: () => import('@/views/jijian/me/Imports.vue'),
+        name: 'JijianMyImportsAlias',
+        meta: {
+          title: '最近导入记录',
+          icon: 'ep:files',
+          hidden: true
         }
       }
     ]

@@ -37,12 +37,14 @@ public class CanteenSupplierConfirmWriteHandler extends AbstractConfirmWriteHand
         List<Long> ids = new ArrayList<>();
         List<String> skippedMessages = new ArrayList<>();
         List<String> failedMessages = new ArrayList<>();
+        int skippedCount = 0;
         for (int i = 0; i < rows.size(); i++) {
             Map<String, String> row = rows.get(i);
             int rowNum = i + 1;
             // 物品名称：支持多种列名；空白行（小计/总计/签字行）直接跳过
             String itemName = get(row, "物品名称", "项目名称", "品名", "商品名称", "食材名称", "名称");
             if (StrUtil.isBlank(itemName) || isSummaryRow(itemName)) {
+                skippedCount++;
                 if (skippedMessages.size() < 20) skippedMessages.add("第 " + rowNum + " 行：空白行或汇总行，已跳过");
                 continue;
             }
@@ -65,6 +67,7 @@ public class CanteenSupplierConfirmWriteHandler extends AbstractConfirmWriteHand
             LocalDate supplyDate = parseLocalDate(get(row, "时间", "日期", "配送日期", "供应日期"));
             if (existsSameBusinessData(itemName, specLevel, get(row, "单位", "计量单位"), quantity, price,
                     subtotal, supplierName, supplyDate)) {
+                skippedCount++;
                 if (skippedMessages.size() < 20) skippedMessages.add("第 " + rowNum + " 行：数据库已存在相同食堂供应数据，已跳过");
                 continue;
             }
@@ -85,9 +88,9 @@ public class CanteenSupplierConfirmWriteHandler extends AbstractConfirmWriteHand
             canteenSupplierMapper.insert(do_);
             ids.add(do_.getId());
         }
-        if (ids.isEmpty() && skippedMessages.isEmpty()) throw exception(PARSED_DATA_ROWS_EMPTY);
+        if (ids.isEmpty() && skippedCount == 0) throw exception(PARSED_DATA_ROWS_EMPTY);
         return ConfirmWriteResult.ofWithStats(getFormType(), getBusinessTableName(), ids,
-                rows.size(), skippedMessages.size(), skippedMessages, failedMessages.size(), failedMessages);
+                rows.size(), skippedCount, skippedMessages, failedMessages.size(), failedMessages);
     }
 
     private boolean isSummaryRow(String value) {

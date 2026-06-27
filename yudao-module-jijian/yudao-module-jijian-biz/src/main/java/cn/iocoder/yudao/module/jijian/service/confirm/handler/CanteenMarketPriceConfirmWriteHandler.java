@@ -45,18 +45,20 @@ public class CanteenMarketPriceConfirmWriteHandler extends AbstractConfirmWriteH
         }
 
         JSONObject root = JSONUtil.parseObj(getActiveJson(parsedData));
-        String sourceTitle = root.getStr("sourceTitle", "");
-        String sourceFileName = root.getStr("fileName", "");
+        String sourceTitle = maxLength(root.getStr("sourceTitle", ""), 512);
+        String sourceFileName = maxLength(root.getStr("fileName", ""), 255);
         String defaultMonth = normalizeMonth(root.getStr("priceMonth", ""));
 
         List<Long> ids = new ArrayList<>();
         List<String> skippedMessages = new ArrayList<>();
         List<String> failedMessages = new ArrayList<>();
+        int skippedCount = 0;
         for (int i = 0; i < rows.size(); i++) {
             Map<String, String> row = rows.get(i);
             int rowNum = i + 1;
             String itemName = get(row, "项目名称", "商品名称", "品名", "名称");
             if (StrUtil.isBlank(itemName) || isSummaryRow(itemName)) {
+                skippedCount++;
                 if (skippedMessages.size() < 20) skippedMessages.add("第 " + rowNum + " 行：空白行或汇总行，已跳过");
                 continue;
             }
@@ -66,6 +68,7 @@ public class CanteenMarketPriceConfirmWriteHandler extends AbstractConfirmWriteH
             String pricePoint = get(row, "采价点", "采价地点", "采价单位", "价格采集点");
             String priceMonth = StrUtil.blankToDefault(normalizeMonth(get(row, "日期", "月份", "公告年月")), defaultMonth);
             if (existsSameBusinessData(itemName, specLevel, unit, price, pricePoint, priceMonth)) {
+                skippedCount++;
                 if (skippedMessages.size() < 20) skippedMessages.add("第 " + rowNum + " 行：数据库已存在相同民生价格公告数据，已跳过");
                 continue;
             }
@@ -83,11 +86,11 @@ public class CanteenMarketPriceConfirmWriteHandler extends AbstractConfirmWriteH
             canteenMarketPriceMapper.insert(item);
             ids.add(item.getId());
         }
-        if (ids.isEmpty() && skippedMessages.isEmpty()) {
+        if (ids.isEmpty() && skippedCount == 0) {
             throw exception(PARSED_DATA_ROWS_EMPTY);
         }
         return ConfirmWriteResult.ofWithStats(getFormType(), getBusinessTableName(), ids,
-                rows.size(), skippedMessages.size(), skippedMessages, failedMessages.size(), failedMessages);
+                rows.size(), skippedCount, skippedMessages, failedMessages.size(), failedMessages);
     }
 
     @Override
@@ -147,5 +150,12 @@ public class CanteenMarketPriceConfirmWriteHandler extends AbstractConfirmWriteH
             return dash.group(1) + "-" + dash.group(2).replaceFirst("^(\\d)$", "0$1");
         }
         return text;
+    }
+
+    private String maxLength(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
     }
 }

@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.jijian.enums.FormTypeConstants;
 import cn.iocoder.yudao.module.jijian.service.confirm.AbstractConfirmWriteHandler;
 import cn.iocoder.yudao.module.jijian.service.confirm.ConfirmWriteResult;
 import cn.iocoder.yudao.module.jijian.util.JijianPersonNameUtils;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -74,6 +75,7 @@ public class AttendanceDailyConfirmWriteHandler extends AbstractConfirmWriteHand
         List<String> failedMessages = new ArrayList<>();
         // 跳过行（纯空白行 / 合计行），最多记录 20 条
         List<String> skippedMessages = new ArrayList<>();
+        int skippedCount = 0;
 
         for (int i = 0; i < rows.size(); i++) {
             Map<String, String> row = rows.get(i);
@@ -92,6 +94,7 @@ public class AttendanceDailyConfirmWriteHandler extends AbstractConfirmWriteHand
                         }
                         log.warn("[AttendanceConfirmWrite] 第 {} 行：有考勤字段但姓名为空，疑似合并单元格问题", rowNum);
                     } else {
+                        skippedCount++;
                         if (skippedMessages.size() < 20) {
                             skippedMessages.add("第 " + rowNum + " 行：空白行或合计行，已跳过");
                         }
@@ -156,6 +159,13 @@ public class AttendanceDailyConfirmWriteHandler extends AbstractConfirmWriteHand
                         .attendanceDate(attendanceDate)
                         .sourceParsedDataId(parsedData.getId())
                         .build();
+                if (existsSameBusinessData(entity)) {
+                    skippedCount++;
+                    if (skippedMessages.size() < 20) {
+                        skippedMessages.add("第 " + rowNum + " 行：数据库已存在相同考勤日报数据，已跳过");
+                    }
+                    continue;
+                }
                 toInsert.add(entity);
 
             } catch (ServiceException se) {
@@ -167,7 +177,7 @@ public class AttendanceDailyConfirmWriteHandler extends AbstractConfirmWriteHand
             }
         }
 
-        if (toInsert.isEmpty()) {
+        if (toInsert.isEmpty() && skippedCount == 0) {
             int shown = Math.min(failedMessages.size(), 5);
             String detail = failedMessages.isEmpty() ? "所有行均为空行或汇总行"
                     : String.join("；", failedMessages.subList(0, shown))
@@ -190,7 +200,7 @@ public class AttendanceDailyConfirmWriteHandler extends AbstractConfirmWriteHand
         int actualInserted = toInsert.size();  // 无异常 = 全部写入成功
 
         log.info("[AttendanceConfirmWrite] 写入完成：总行={} 成功={} 跳过={} 失败={} parsedDataId={}",
-                rows.size(), actualInserted, skippedMessages.size(), failedMessages.size(), parsedData.getId());
+                rows.size(), actualInserted, skippedCount, failedMessages.size(), parsedData.getId());
 
         return ConfirmWriteResult.builder()
                 .formType(getFormType())
@@ -199,11 +209,24 @@ public class AttendanceDailyConfirmWriteHandler extends AbstractConfirmWriteHand
                 .confirmedCount(actualInserted)
                 .idempotent(false)
                 .totalRows(rows.size())
-                .skippedRows(skippedMessages.size())
+                .skippedRows(skippedCount)
                 .skippedMessages(skippedMessages)
                 .failedRows(failedMessages.size())
                 .failedMessages(failedMessages)
                 .build();
+    }
+
+    private boolean existsSameBusinessData(AttendanceDailyDO entity) {
+        LambdaQueryWrapper<AttendanceDailyDO> wrapper = new LambdaQueryWrapper<AttendanceDailyDO>()
+                .eq(AttendanceDailyDO::getEmployeeName, entity.getEmployeeName())
+                .eq(StrUtil.isNotBlank(entity.getEmployeeNo()), AttendanceDailyDO::getEmployeeNo, entity.getEmployeeNo())
+                .eq(StrUtil.isNotBlank(entity.getDepartment()), AttendanceDailyDO::getDepartment, entity.getDepartment())
+                .eq(entity.getAttendanceDate() != null, AttendanceDailyDO::getAttendanceDate, entity.getAttendanceDate())
+                .eq(entity.getCheckinTime() != null, AttendanceDailyDO::getCheckinTime, entity.getCheckinTime())
+                .eq(StrUtil.isNotBlank(entity.getCheckinResult()), AttendanceDailyDO::getCheckinResult, entity.getCheckinResult())
+                .eq(entity.getCheckoutTime() != null, AttendanceDailyDO::getCheckoutTime, entity.getCheckoutTime())
+                .eq(StrUtil.isNotBlank(entity.getCheckoutResult()), AttendanceDailyDO::getCheckoutResult, entity.getCheckoutResult());
+        return attendanceDailyMapper.selectCount(wrapper) > 0;
     }
 
     @Override

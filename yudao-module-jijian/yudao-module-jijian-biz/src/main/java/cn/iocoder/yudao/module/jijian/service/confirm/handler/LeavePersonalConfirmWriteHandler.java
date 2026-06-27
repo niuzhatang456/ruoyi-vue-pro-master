@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.jijian.enums.FormTypeConstants;
 import cn.iocoder.yudao.module.jijian.service.confirm.AbstractConfirmWriteHandler;
 import cn.iocoder.yudao.module.jijian.service.confirm.ConfirmWriteResult;
 import cn.iocoder.yudao.module.jijian.util.JijianPersonNameUtils;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -52,6 +53,7 @@ public class LeavePersonalConfirmWriteHandler extends AbstractConfirmWriteHandle
         List<Long> ids = new ArrayList<>(rows.size());
         List<String> failedMessages = new ArrayList<>();
         List<String> skippedMessages = new ArrayList<>();
+        int skippedCount = 0;
 
         for (int i = 0; i < rows.size(); i++) {
             Map<String, String> row = rows.get(i);
@@ -63,6 +65,7 @@ public class LeavePersonalConfirmWriteHandler extends AbstractConfirmWriteHandle
                     if (StrUtil.isNotBlank(biz)) {
                         if (failedMessages.size() < 20) failedMessages.add("第 " + rowNum + " 行：申请人为空但存在业务字段");
                     } else {
+                        skippedCount++;
                         if (skippedMessages.size() < 20) skippedMessages.add("第 " + rowNum + " 行：空白行，已跳过");
                     }
                     continue;
@@ -85,20 +88,38 @@ public class LeavePersonalConfirmWriteHandler extends AbstractConfirmWriteHandle
                 // is_outside：直接按原文存储，不做 0/1 转换
                 String isOutside = StrUtil.trimToNull(get(row, "是否出义", "出义", "是否外出", "外出"));
 
+                String department = get(row, "部门", "所在部门", "申请部门");
+                String leaveType = get(row, "请假类型", "假别", "类型");
+                String leaveReason = get(row, "请假事由", "事由", "原因");
+                LocalDateTime startTime = parseDateTime(get(row, "请假开始时间", "开始时间", "开始日期"), rowNum);
+                LocalDateTime endTime = parseDateTime(get(row, "请假结束时间", "结束时间", "结束日期"), rowNum);
+                String outsideLocation = get(row, "出义具体地点", "出义地点", "外出地点");
+                String leaveStatus = get(row, "请假状态", "状态");
+                String leaveMonth = get(row, "请假月份", "月份");
+                String remark = get(row, "备注", "说明");
+                if (existsSameBusinessData(department, pureName, employeeNo, leaveType, leaveReason,
+                        startTime, endTime, days, isOutside, outsideLocation, leaveStatus, leaveMonth)) {
+                    skippedCount++;
+                    if (skippedMessages.size() < 20) {
+                        skippedMessages.add("第 " + rowNum + " 行：数据库已存在相同事假数据，已跳过");
+                    }
+                    continue;
+                }
+
                 LeavePersonalDO entity = LeavePersonalDO.builder()
-                        .department(get(row, "部门", "所在部门", "申请部门"))
+                        .department(department)
                         .applicantName(pureName)
                         .employeeNo(employeeNo)
-                        .leaveType(get(row, "请假类型", "假别", "类型"))
-                        .leaveReason(get(row, "请假事由", "事由", "原因"))
-                        .startTime(parseDateTime(get(row, "请假开始时间", "开始时间", "开始日期"), rowNum))
-                        .endTime(parseDateTime(get(row, "请假结束时间", "结束时间", "结束日期"), rowNum))
+                        .leaveType(leaveType)
+                        .leaveReason(leaveReason)
+                        .startTime(startTime)
+                        .endTime(endTime)
                         .leaveDays(days)
                         .isOutside(isOutside)          // 原文存储
-                        .outsideLocation(get(row, "出义具体地点", "出义地点", "外出地点"))
-                        .leaveStatus(get(row, "请假状态", "状态"))
-                        .leaveMonth(get(row, "请假月份", "月份"))
-                        .remark(get(row, "备注", "说明"))
+                        .outsideLocation(outsideLocation)
+                        .leaveStatus(leaveStatus)
+                        .leaveMonth(leaveMonth)
+                        .remark(remark)
                         .sourceParsedDataId(parsedData.getId())
                         .build();
 
@@ -115,15 +136,41 @@ public class LeavePersonalConfirmWriteHandler extends AbstractConfirmWriteHandle
         }
 
         if (ids.isEmpty()) {
+            if (skippedCount > 0 && failedMessages.isEmpty()) {
+                log.info("[LeavePersonalConfirmWrite] 总行={} 成功=0 跳过={} 失败=0",
+                        rows.size(), skippedCount);
+                return ConfirmWriteResult.ofWithStats(getFormType(), getBusinessTableName(), ids,
+                        rows.size(), skippedCount, skippedMessages, 0, failedMessages);
+            }
             String detail = failedMessages.isEmpty() ? "所有行均为空行"
                     : String.join("；", failedMessages.subList(0, Math.min(5, failedMessages.size())));
             throw new ServiceException(PARSED_DATA_REQUIRED_FIELD_MISSING.getCode(), "事假表全部行写入失败：" + detail);
         }
 
         log.info("[LeavePersonalConfirmWrite] 总行={} 成功={} 跳过={} 失败={}",
-                rows.size(), ids.size(), skippedMessages.size(), failedMessages.size());
+                rows.size(), ids.size(), skippedCount, failedMessages.size());
         return ConfirmWriteResult.ofWithStats(getFormType(), getBusinessTableName(), ids,
-                rows.size(), skippedMessages.size(), skippedMessages, failedMessages.size(), failedMessages);
+                rows.size(), skippedCount, skippedMessages, failedMessages.size(), failedMessages);
+    }
+
+    private boolean existsSameBusinessData(String department, String applicantName, String employeeNo,
+                                           String leaveType, String leaveReason, LocalDateTime startTime,
+                                           LocalDateTime endTime, BigDecimal leaveDays, String isOutside,
+                                           String outsideLocation, String leaveStatus, String leaveMonth) {
+        LambdaQueryWrapper<LeavePersonalDO> wrapper = new LambdaQueryWrapper<LeavePersonalDO>()
+                .eq(StrUtil.isNotBlank(department), LeavePersonalDO::getDepartment, department)
+                .eq(LeavePersonalDO::getApplicantName, applicantName)
+                .eq(StrUtil.isNotBlank(employeeNo), LeavePersonalDO::getEmployeeNo, employeeNo)
+                .eq(StrUtil.isNotBlank(leaveType), LeavePersonalDO::getLeaveType, leaveType)
+                .eq(StrUtil.isNotBlank(leaveReason), LeavePersonalDO::getLeaveReason, leaveReason)
+                .eq(startTime != null, LeavePersonalDO::getStartTime, startTime)
+                .eq(endTime != null, LeavePersonalDO::getEndTime, endTime)
+                .eq(leaveDays != null, LeavePersonalDO::getLeaveDays, leaveDays)
+                .eq(StrUtil.isNotBlank(isOutside), LeavePersonalDO::getIsOutside, isOutside)
+                .eq(StrUtil.isNotBlank(outsideLocation), LeavePersonalDO::getOutsideLocation, outsideLocation)
+                .eq(StrUtil.isNotBlank(leaveStatus), LeavePersonalDO::getLeaveStatus, leaveStatus)
+                .eq(StrUtil.isNotBlank(leaveMonth), LeavePersonalDO::getLeaveMonth, leaveMonth);
+        return leavePersonalMapper.selectCount(wrapper) > 0;
     }
 
     @Override

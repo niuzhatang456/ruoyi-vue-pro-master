@@ -66,6 +66,7 @@ public class CompensatoryLeaveConfirmWriteHandler extends AbstractConfirmWriteHa
         List<String> failedMessages = new ArrayList<>();
         // 跳过行（纯空白行 / 合计行），最多记录 20 条
         List<String> skippedMessages = new ArrayList<>();
+        int skippedCount = 0;
 
         for (int i = 0; i < rows.size(); i++) {
             Map<String, String> row = rows.get(i);
@@ -89,6 +90,7 @@ public class CompensatoryLeaveConfirmWriteHandler extends AbstractConfirmWriteHa
                         }
                         log.warn("[CompensatoryConfirmWrite] 第 {} 行：有业务字段但姓名为空，疑似合并单元格问题。行摘要：{}", rowNum, rowSummary(row));
                     } else {
+                        skippedCount++;
                         if (skippedMessages.size() < 20) {
                             skippedMessages.add("第 " + rowNum + " 行：空白行或合计行，已跳过");
                         }
@@ -155,11 +157,11 @@ public class CompensatoryLeaveConfirmWriteHandler extends AbstractConfirmWriteHa
         }
 
         log.info("[CompensatoryConfirmWrite] 写入完成：总行={} 成功={} 跳过={} 失败={}",
-                rows.size(), ids.size(), skippedMessages.size(), failedMessages.size());
+                rows.size(), ids.size(), skippedCount, failedMessages.size());
 
         return ConfirmWriteResult.ofWithStats(
                 getFormType(), getBusinessTableName(), ids,
-                rows.size(), skippedMessages.size(), skippedMessages,
+                rows.size(), skippedCount, skippedMessages,
                 failedMessages.size(), failedMessages);
     }
 
