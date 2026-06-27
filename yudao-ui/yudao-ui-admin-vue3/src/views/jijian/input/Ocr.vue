@@ -89,7 +89,6 @@ import ParsedDataPanel from '../components/ParsedDataPanel.vue'
 import type { ImportRecord, ParsedData } from '../types'
 
 const ACCEPT_TYPES = '.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.pdf'
-const EXCEL_EXTS  = ['.xls', '.xlsx', '.csv', '.txt']
 const OCR_EXTS    = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.pdf']
 
 const loading    = ref(false)

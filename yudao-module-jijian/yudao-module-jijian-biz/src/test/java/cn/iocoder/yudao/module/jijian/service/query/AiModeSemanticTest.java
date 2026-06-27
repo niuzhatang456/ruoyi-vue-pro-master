@@ -133,7 +133,7 @@ class AiModeSemanticTest {
     }
 
     @Test
-    void dropdownFormTypeOverridesAiOrNaturalLanguageIntent() throws Exception {
+    void defaultAttendanceDoesNotOverrideExplicitCanteenText() throws Exception {
         JijianQueryChatServiceImpl service = new JijianQueryChatServiceImpl();
         JijianQueryChatReqVO req = new JijianQueryChatReqVO();
         req.setFormType("ATTENDANCE");
@@ -151,7 +151,50 @@ class AiModeSemanticTest {
         sanitize.setAccessible(true);
         JijianAiQueryIntent result = (JijianAiQueryIntent) sanitize.invoke(service, aiIntent, req);
 
-        assertEquals("ATTENDANCE_DAILY", result.getFormType());
+        assertEquals("CANTEEN_SUPPLIER", result.getFormType());
+    }
+
+    @Test
+    void explicitCanteenTextOverridesWrongAiFormType() throws Exception {
+        JijianQueryChatServiceImpl service = new JijianQueryChatServiceImpl();
+        JijianQueryChatReqVO req = new JijianQueryChatReqVO();
+        req.setDepartment("ALL");
+        req.setTimeRange("ONE_WEEK");
+        req.setMessage("分析食堂供应价格和民生价格公告");
+
+        JijianAiQueryIntent aiIntent = new JijianAiQueryIntent();
+        aiIntent.setFormType("ATTENDANCE_DAILY");
+        aiIntent.setDepartment("ALL");
+        aiIntent.setTimeRange("ONE_WEEK");
+
+        Method sanitize = JijianQueryChatServiceImpl.class
+                .getDeclaredMethod("sanitizeIntent", JijianAiQueryIntent.class, JijianQueryChatReqVO.class);
+        sanitize.setAccessible(true);
+        JijianAiQueryIntent result = (JijianAiQueryIntent) sanitize.invoke(service, aiIntent, req);
+
+        assertEquals("CANTEEN_SUPPLIER", result.getFormType());
+    }
+
+    @Test
+    void nonDefaultDropdownFormTypeOverridesNaturalLanguageIntent() throws Exception {
+        JijianQueryChatServiceImpl service = new JijianQueryChatServiceImpl();
+        JijianQueryChatReqVO req = new JijianQueryChatReqVO();
+        req.setFormType("PROPERTY_INFO");
+        req.setDepartment("ALL");
+        req.setTimeRange("ONE_WEEK");
+        req.setMessage("分析食堂供应价格和民生价格公告");
+
+        JijianAiQueryIntent aiIntent = new JijianAiQueryIntent();
+        aiIntent.setFormType("CANTEEN_SUPPLY");
+        aiIntent.setDepartment("ALL");
+        aiIntent.setTimeRange("ONE_WEEK");
+
+        Method sanitize = JijianQueryChatServiceImpl.class
+                .getDeclaredMethod("sanitizeIntent", JijianAiQueryIntent.class, JijianQueryChatReqVO.class);
+        sanitize.setAccessible(true);
+        JijianAiQueryIntent result = (JijianAiQueryIntent) sanitize.invoke(service, aiIntent, req);
+
+        assertEquals("PROPERTY_INFO", result.getFormType());
     }
 
     @Test

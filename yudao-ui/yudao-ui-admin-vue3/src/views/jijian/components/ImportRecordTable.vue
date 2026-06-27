@@ -19,17 +19,7 @@
     <el-table-column v-if="showActions" label="操作" width="200" fixed="right">
       <template #default="{ row }">
         <el-button type="primary" link @click="emit('view-parsed', row)">查看解析</el-button>
-        <el-tooltip
-          v-if="row.status === 'failed'"
-          content="解析失败，未写入业务数据，无需删除"
-          placement="top"
-        >
-          <span>
-            <el-button type="danger" link disabled>删除导入数据</el-button>
-          </span>
-        </el-tooltip>
         <el-button
-          v-else
           type="danger"
           link
           @click="emit('delete-business-data', row)"

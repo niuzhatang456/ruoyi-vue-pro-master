@@ -159,44 +159,6 @@
                   </div>
                 </div>
 
-                <!-- 数据库原始数据（规则查询接口返回） -->
-                <div v-if="msg.pageResult?.list?.length" class="result-table raw-data-table">
-                  <div class="table-title table-title--actions">
-                    <span>数据库原始数据</span>
-                    <el-button size="small" type="primary" plain @click="handleDispose(msg, idx)">
-                      处置
-                    </el-button>
-                  </div>
-                  <el-table :data="msg.pageResult.list" stripe size="small" max-height="300">
-                    <el-table-column
-                      v-for="col in msg.columns"
-                      :key="col.key"
-                      :prop="col.key"
-                      :label="col.label"
-                      min-width="110"
-                      show-overflow-tooltip
-                    />
-                    <el-table-column
-                      v-if="hasContractOriginalRows(msg.pageResult.list)"
-                      label="合同原件"
-                      width="120"
-                      fixed="right"
-                    >
-                      <template #default="{ row }">
-                        <el-button
-                          v-if="getContractOriginalUrl(row)"
-                          type="primary"
-                          size="small"
-                          link
-                          @click="openContractOriginal(row)"
-                        >
-                          查看合同原件
-                        </el-button>
-                      </template>
-                    </el-table-column>
-                  </el-table>
-                </div>
-
                 <!-- 数据来源元信息 -->
                 <div v-if="msg.databaseContextMeta" class="db-meta">
                   <span>数据来源：本地数据库只读查询</span>
@@ -231,6 +193,51 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <div v-if="latestDatabaseMessage" class="database-panel">
+        <div class="database-panel__header">
+          <div>
+            <div class="database-panel__title">数据库实际返回数据</div>
+            <div class="database-panel__meta">
+              共 {{ latestDatabaseMessage.pageResult?.total ?? latestDatabaseRows.length }} 条
+              <span v-if="latestDatabaseMessage.databaseContextMeta?.tablesUsed?.length">
+                · {{ latestDatabaseMessage.databaseContextMeta.tablesUsed.join('、') }}
+              </span>
+            </div>
+          </div>
+          <el-button size="small" type="primary" plain @click="handleDispose(latestDatabaseMessage, latestDatabaseMessageIndex)">
+            处置
+          </el-button>
+        </div>
+        <el-table :data="latestDatabaseRows" stripe size="small" height="220">
+          <el-table-column
+            v-for="col in latestDatabaseColumns"
+            :key="col.key"
+            :prop="col.key"
+            :label="col.label"
+            min-width="110"
+            show-overflow-tooltip
+          />
+          <el-table-column
+            v-if="hasContractOriginalRows(latestDatabaseRows)"
+            label="合同原件"
+            width="120"
+            fixed="right"
+          >
+            <template #default="{ row }">
+              <el-button
+                v-if="getContractOriginalUrl(row)"
+                type="primary"
+                size="small"
+                link
+                @click="openContractOriginal(row)"
+              >
+                查看合同原件
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
 
       <!-- 底部输入区 -->
@@ -357,6 +364,26 @@ const latestAiIdx = computed<number>(() => {
   }
   return -1
 })
+
+const latestDatabaseMessageIndex = computed<number>(() => {
+  const msgs = currentMessages.value
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (!msgs[i].loading && msgs[i].pageResult?.list?.length) return i
+  }
+  return -1
+})
+
+const latestDatabaseMessage = computed<ChatMessage | null>(() =>
+  latestDatabaseMessageIndex.value >= 0 ? currentMessages.value[latestDatabaseMessageIndex.value] : null
+)
+
+const latestDatabaseRows = computed<Array<Record<string, any>>>(() =>
+  latestDatabaseMessage.value?.pageResult?.list ?? []
+)
+
+const latestDatabaseColumns = computed<Array<{ key: string; label: string }>>(() =>
+  latestDatabaseMessage.value?.columns ?? []
+)
 
 const chatInput = ref('')
 const chatLoading = ref(false)
@@ -755,13 +782,13 @@ watch(latestAiIdx, async (idx) => {
 // ===== 工具函数 =====
 const aiModeText = (mode?: string) => {
   switch (mode) {
-    case 'DEEPSEEK_SQL_AGENT': return 'SQL Agent 全量分析'
-    case 'DEEPSEEK_KEY_MISSING': return 'DeepSeek Key 未配置'
-    case 'DEEPSEEK_DATA_ANALYSIS': return 'DeepSeek 数据分析'
-    case 'DEEPSEEK_SUMMARY': return 'DeepSeek 摘要'
-    case 'DEEPSEEK_INTENT': return 'DeepSeek 解析'
-    case 'LOCAL_FALLBACK': return '本地规则'
-    default: return mode || '本地规则'
+    case 'DEEPSEEK_SQL_AGENT': return 'DeepSeek SQL Agent（真实调用）'
+    case 'DEEPSEEK_KEY_MISSING': return 'DeepSeek API Key 未配置'
+    case 'DEEPSEEK_DATA_ANALYSIS': return 'DeepSeek 数据分析（真实调用）'
+    case 'DEEPSEEK_SUMMARY': return 'DeepSeek 摘要（真实调用）'
+    case 'DEEPSEEK_INTENT': return 'DeepSeek 意图解析（真实调用）'
+    case 'LOCAL_FALLBACK': return '当前使用规则查询，未调用 DeepSeek'
+    default: return mode || '当前使用规则查询，未调用 DeepSeek'
   }
 }
 
@@ -938,6 +965,34 @@ onUnmounted(() => disposeCharts())
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.database-panel {
+  flex-shrink: 0;
+  max-height: 300px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--el-border-color-light);
+  background: var(--el-bg-color);
+}
+
+.database-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.database-panel__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.database-panel__meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
 }
 
 .msg-row {

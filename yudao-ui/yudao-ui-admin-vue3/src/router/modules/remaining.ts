@@ -53,7 +53,7 @@ const remainingRouter: AppRouteRecordRaw[] = [
   {
     path: '/',
     component: Layout,
-    redirect: '/input/drag',
+    redirect: '/jijian/input/drag',
     name: 'Home',
     meta: {
       hidden: true
@@ -230,6 +230,42 @@ const remainingRouter: AppRouteRecordRaw[] = [
         }
       }
     ]
+  },
+  {
+    path: '/input/:pathMatch(.*)*',
+    name: 'JijianInputLegacyAlias',
+    redirect: (to) => {
+      const match = to.params.pathMatch
+      const suffix = Array.isArray(match) ? match.join('/') : match
+      return suffix ? `/jijian/input/${suffix}` : '/jijian/input/drag'
+    },
+    meta: {
+      hidden: true
+    }
+  },
+  {
+    path: '/query/:pathMatch(.*)*',
+    name: 'JijianQueryLegacyAlias',
+    redirect: (to) => {
+      const match = to.params.pathMatch
+      const suffix = Array.isArray(match) ? match.join('/') : match
+      return suffix ? `/jijian/query/${suffix}` : '/jijian/query/smart'
+    },
+    meta: {
+      hidden: true
+    }
+  },
+  {
+    path: '/me/:pathMatch(.*)*',
+    name: 'JijianMeLegacyAlias',
+    redirect: (to) => {
+      const match = to.params.pathMatch
+      const suffix = Array.isArray(match) ? match.join('/') : match
+      return suffix ? `/jijian/me/${suffix}` : '/jijian/me/history'
+    },
+    meta: {
+      hidden: true
+    }
   },
   {
     path: '/jijian/me',
@@ -511,11 +547,8 @@ const remainingRouter: AppRouteRecordRaw[] = [
   },
   {
     path: '/jijian/:pathMatch(.*)*',
-    redirect: (to) => {
-      const match = to.params.pathMatch
-      const suffix = Array.isArray(match) ? match.join('/') : match
-      return suffix ? `/${suffix}` : '/input/drag'
-    },
+    name: 'JijianFallback',
+    redirect: '/jijian/input/drag',
     meta: {
       hidden: true
     }

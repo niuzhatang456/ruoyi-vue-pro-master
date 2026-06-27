@@ -170,12 +170,26 @@ public class PaddleOcrServiceImpl implements OcrService {
 
     private OcrResult convertToOcrResult(PaddleOcrResponse resp) {
         if (!resp.isSuccess()) {
-            throw exception(OCR_RECOGNITION_FAILED);
+            return OcrResult.builder()
+                    .success(false)
+                    .fullText("")
+                    .lines(new ArrayList<>())
+                    .tables(new ArrayList<>())
+                    .errorMessage(StrUtil.blankToDefault(resp.getMessage(), "OCR 服务返回识别失败"))
+                    .notice("")
+                    .build();
         }
 
         String fullText = StrUtil.blankToDefault(resp.getText(), "");
         if (StrUtil.isBlank(fullText)) {
-            throw exception(OCR_RECOGNITION_FAILED);
+            return OcrResult.builder()
+                    .success(false)
+                    .fullText("")
+                    .lines(new ArrayList<>())
+                    .tables(new ArrayList<>())
+                    .errorMessage("OCR 未返回有效文本，可能是 PDF 无可识别文字、页数超限或图片过于模糊")
+                    .notice(StrUtil.blankToDefault(resp.getMessage(), ""))
+                    .build();
         }
 
         List<String> lines = new ArrayList<>();

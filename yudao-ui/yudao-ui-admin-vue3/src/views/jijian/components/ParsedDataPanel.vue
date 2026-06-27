@@ -183,7 +183,7 @@
           </el-space>
         </div>
         <div class="table-wrapper">
-          <el-table :data="tableRows" border size="small" class="correction-table">
+          <el-table :data="tableRows" border size="small" class="correction-table" height="100%">
             <el-table-column type="index" :index="pageStart + 1" label="#" width="60" fixed />
             <el-table-column
               v-for="header in tableHeaders"
@@ -804,7 +804,8 @@ async function handleConfirm() {
 .table-wrapper {
   position: relative;
   overflow: auto;
-  max-height: 70vh;
+  height: min(62vh, 560px);
+  min-height: 320px;
   padding-bottom: 10px;
   scrollbar-gutter: stable both-edges;
 }

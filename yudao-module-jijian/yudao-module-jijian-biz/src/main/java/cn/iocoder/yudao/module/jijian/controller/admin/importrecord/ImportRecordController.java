@@ -121,6 +121,7 @@ public class ImportRecordController {
         // Sheet 信息（仅 Excel 有意义）
         respVO.setSheetName(extractSheetName(parsedData));
         respVO.setSheetCount(extractSheetCount(parsedData));
+        respVO.setTotalRows(extractTotalRows(parsedData));
         // 候选列表
         List<DragDetectRespVO.CandidateVO> candidates = new ArrayList<>();
         for (JijianFormTypeAutoDetectService.CandidateScore c : detectResult.candidateTypes) {
@@ -162,6 +163,9 @@ public class ImportRecordController {
         respVO.setNeedsConfirmation(false);
         respVO.setParseStatus(parsedData != null ? parsedData.getStatus() : "failed");
         respVO.setErrorMsg(parsedData != null ? parsedData.getErrorMsg() : null);
+        respVO.setSheetName(extractSheetName(parsedData));
+        respVO.setSheetCount(extractSheetCount(parsedData));
+        respVO.setTotalRows(extractTotalRows(parsedData));
         respVO.setCandidateTypes(Collections.emptyList());
         return success(respVO);
     }
@@ -198,6 +202,22 @@ public class ImportRecordController {
         return 1;
     }
 
+    private Integer extractTotalRows(ParsedDataDO pd) {
+        if (pd == null || pd.getParsedJson() == null) return null;
+        try {
+            cn.hutool.json.JSONObject json = JSONUtil.parseObj(pd.getParsedJson());
+            Integer totalRows = json.getInt("totalRows");
+            if (totalRows != null) {
+                return totalRows;
+            }
+            Object rows = json.get("rows");
+            if (rows instanceof List) {
+                return ((List<?>) rows).size();
+            }
+        } catch (Exception ignore) {}
+        return null;
+    }
+
     /** 拖拽检测响应 VO */
     @Data
     public static class DragDetectRespVO {
@@ -216,6 +236,8 @@ public class ImportRecordController {
         private String sheetName;
         /** Excel 文件的 Sheet 总数；非 Excel 或单 Sheet 均为 1 */
         private int sheetCount = 1;
+        /** 解析出的总行数；避免前端为展示行数再拉取完整 parsedJson */
+        private Integer totalRows;
 
         @Data
         public static class CandidateVO {

@@ -205,6 +205,12 @@ public class LeaseContractParseService {
     }
 
     private String extractLesseePhone(String text, String idCard) {
+        String explicit = extractPhoneAfterLabels(text, Arrays.asList(
+                "乙方联系电话", "乙方电话", "承租方联系电话", "承租方电话", "承租人联系电话", "承租人电话"));
+        if (StrUtil.isNotBlank(explicit)) {
+            return explicit;
+        }
+
         List<String> idCards = findAll(text, ID_CARD);
         if (StrUtil.isNotBlank(idCard) && !idCards.contains(idCard)) {
             idCards.add(idCard);
@@ -219,10 +225,18 @@ public class LeaseContractParseService {
             }
             int start = matcher.start();
             String window = around(text, start, 220);
+            String before = text.substring(Math.max(0, start - 140), start);
+            String after = text.substring(start, Math.min(text.length(), start + 60));
             int score = 0;
-            if (containsAny(window, "乙方", "承租方", "承租人")) score += 40;
+            if (containsAny(before, "乙方", "承租方", "承租人")) score += 60;
+            if (containsAny(before, "甲方", "出租方", "出租人")) score -= 70;
+            if (containsAny(window, "乙方", "承租方", "承租人")) score += 20;
             if (containsAny(window, "联系电话", "电话", "手机")) score += 35;
+            if (containsAny(window, "联系人")) score += 20;
             if (containsAny(window, "甲方", "出租方")) score -= 40;
+            if (containsAny(around(text, start, 80), "甲方联系电话", "出租方联系电话", "甲方电话", "出租方电话")) score -= 80;
+            if (containsAny(around(text, start, 80), "乙方联系电话", "承租方联系电话", "乙方电话", "承租方电话")) score += 80;
+            if (containsAny(before + after, "乙方签字", "承租方签字", "乙方盖章", "承租方盖章")) score += 70;
             if (start > Math.max(0, text.length() - 1800)) score += 10;
             if (score > bestScore) {
                 best = candidate;
@@ -230,6 +244,21 @@ public class LeaseContractParseService {
             }
         }
         return bestScore >= 0 ? best : "";
+    }
+
+    private String extractPhoneAfterLabels(String text, List<String> labels) {
+        for (String label : labels) {
+            int idx = text.indexOf(label);
+            if (idx < 0) {
+                continue;
+            }
+            String window = text.substring(idx, Math.min(text.length(), idx + 140));
+            Matcher matcher = MOBILE.matcher(window);
+            if (matcher.find()) {
+                return matcher.group();
+            }
+        }
+        return "";
     }
 
     private String extractHouseCondition(String text) {

@@ -238,7 +238,7 @@ import { ElMessage } from 'element-plus'
 import { Loading }   from '@element-plus/icons-vue'
 import type { UploadFile, UploadFiles } from 'element-plus'
 import request from '@/config/axios'
-import { confirmWrite, getParsedData } from '@/api/jijian/import'
+import { confirmWrite, getParsedData, getParsedDataDetail } from '@/api/jijian/import'
 import PageShell from '../components/PageShell.vue'
 import ParsedDataPanel from '../components/ParsedDataPanel.vue'
 import type { ParsedData } from '../types'
@@ -291,6 +291,7 @@ const uploading     = ref(false)
 const confirmingAll = ref(false)
 const fileResults   = ref<FileResult[]>([])
 let uploadTimer: ReturnType<typeof setTimeout> | undefined
+const previewCache = new Map<number, ParsedData>()
 
 // ── 计算属性 ──────────────────────────────────────────────────────────────────
 
@@ -308,10 +309,11 @@ const handleFileChange = (_file: UploadFile, fileList: UploadFiles) => {
   uploadTimer = setTimeout(() => {
     const files = fileList
       .map(f => f.raw)
-      .filter((f): f is File => Boolean(f))
+      .filter(f => f != null) as File[]
+    const pendingFiles = files
       .filter(f => !fileResults.value.some(r => r.fileName === f.name))
-    if (files.length === 0) return
-    uploadFiles(files)
+    if (pendingFiles.length === 0) return
+    uploadFiles(pendingFiles)
   }, 200)
 }
 
@@ -322,7 +324,7 @@ async function uploadFiles(files: File[]) {
     needsConfirmation: false, confirming: false
   }))
   fileResults.value = [...fileResults.value, ...newRows]
-  const CONCURRENCY = 3
+  const CONCURRENCY = 1
   for (let i = 0; i < files.length; i += CONCURRENCY) {
     await Promise.all(files.slice(i, i + CONCURRENCY).map(f => uploadSingle(f)))
   }
@@ -355,16 +357,9 @@ async function uploadSingle(file: File) {
     row.sheetName = result.sheetName || ''
     row.sheetCount = result.sheetCount ?? 1
 
-    // 从 parsedJson 读取行数
-    if (row.parsedId) {
-      try {
-        const pd = await getParsedData(row.importRecordId as number)
-        const pj = JSON.parse(pd.parsedJson || '{}')
-        row.totalRows = typeof pj.totalRows === 'number' ? pj.totalRows : pj.rows?.length
-      } catch { /* ignore */ }
-    }
+    row.totalRows = result.totalRows
 
-    if (row.status === 'success' && !row.needsConfirmation && row.parsedId) {
+    if (row.status === 'success' && !row.needsConfirmation && row.parsedId && !inlinePreviewRow.value) {
       await showInlinePreview(row)
     }
   } catch (err: unknown) {
@@ -432,7 +427,7 @@ async function showInlinePreview(row: FileResult) {
   inlinePreviewLoading.value = true
   inlinePreviewParsedData.value = null
   try {
-    inlinePreviewParsedData.value = await getParsedData(row.importRecordId) as unknown as ParsedData
+    inlinePreviewParsedData.value = await loadParsedDataForRow(row)
   } catch (err: unknown) {
     ElMessage.error(err instanceof Error ? err.message : '加载预览失败')
     inlinePreviewRow.value = null
@@ -456,12 +451,29 @@ async function openPreview(row: FileResult) {
   await showInlinePreview(row)
 }
 
+async function loadParsedDataForRow(row: FileResult): Promise<ParsedData> {
+  const cacheKey = row.parsedId || row.importRecordId
+  if (cacheKey && previewCache.has(cacheKey)) {
+    return previewCache.get(cacheKey)!
+  }
+  const data = row.parsedId
+    ? await getParsedDataDetail(row.parsedId) as unknown as ParsedData
+    : await getParsedData(row.importRecordId as number) as unknown as ParsedData
+  if (cacheKey) {
+    previewCache.set(cacheKey, data)
+  }
+  return data
+}
+
 async function confirmFromPreview() {
   if (!previewRow.value) return
   await confirmSingle(previewRow.value)
   if (previewRow.value.status === 'confirmed' && previewRow.value.importRecordId) {
     try {
-      previewParsedData.value = await getParsedData(previewRow.value.importRecordId) as unknown as ParsedData
+      if (previewRow.value.parsedId) {
+        previewCache.delete(previewRow.value.parsedId)
+      }
+      previewParsedData.value = await loadParsedDataForRow(previewRow.value)
     } catch { /* ignore */ }
   }
 }
@@ -511,6 +523,10 @@ async function confirmTypeSelection() {
     row.needsConfirmation = false
     row.status = result.parseStatus || 'success'
     row.errorMsg = result.errorMsg || ''
+    row.totalRows = result.totalRows
+    if (row.parsedId) {
+      previewCache.delete(row.parsedId)
+    }
     typeSelectorVisible.value = false
     ElMessage.success(`已以「${row.formTypeName}」类型重新解析`)
   } catch (err: unknown) {

@@ -603,7 +603,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         OcrResult ocrResult = ocrService.recognize(fileBytes, fileName);
 
         if (!ocrResult.isSuccess()) {
-            throw exception(OCR_RECOGNITION_FAILED);
+            throwOcrRecognitionFailed(ocrResult);
         }
 
         return buildOcrPayload(fileName, ocrResult);
@@ -1010,7 +1010,7 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             }
             OcrResult ocrResult = ocrService.recognize(fileBytes, fileName, OCR_ALL_PDF_PAGES);
             if (!ocrResult.isSuccess()) {
-                throw exception(OCR_RECOGNITION_FAILED);
+                throwOcrRecognitionFailed(ocrResult);
             }
             contractText = ocrResult.getFullText();
         } else if (isExcel(fname)) {
@@ -1105,19 +1105,24 @@ public class ParsedDataServiceImpl implements ParsedDataService {
         if (StrUtil.isBlank(text)) {
             return false;
         }
-        boolean hasLessor = containsAny(text, "出租方", "甲方");
-        boolean hasLessee = containsAny(text, "承租方", "乙方");
-        boolean hasPeriod = containsAny(text, "租赁期限", "租赁期", "租赁期自", "起至");
-        boolean hasRent = containsAny(text, "房屋租金", "年租金", "租金");
+        boolean hasTitle = containsAny(text, "房屋租赁合同", "租赁合同", "出租合同", "租房合同");
+        boolean hasLessor = containsAny(text, "出租方", "甲方", "出租人", "房东");
+        boolean hasLessee = containsAny(text, "承租方", "乙方", "承租人", "租赁方");
+        boolean hasPeriod = containsAny(text, "租赁期限", "租赁期", "租赁期自", "起至", "租期");
+        boolean hasRent = containsAny(text, "房屋租金", "年租金", "月租金", "租金");
+        boolean hasHouse = containsAny(text, "房屋座落", "房屋坐落", "坐落于", "座落于", "房屋状况", "租赁房屋");
         int score = 0;
-        if (containsAny(text, "房屋租赁合同", "租赁合同", "出租合同", "综合楼出租")) score++;
+        if (hasTitle || containsAny(text, "综合楼出租")) score += 2;
         if (hasLessor) score++;
         if (hasLessee) score++;
         if (hasPeriod) score++;
         if (hasRent) score++;
+        if (hasHouse) score++;
         if (containsAny(text, "保证金", "押金")) score++;
         if (containsAny(text, "签订日期", "合同签订日期", "签约日期")) score++;
-        return score >= 4 && hasLessor && hasLessee && (hasPeriod || hasRent);
+        return score >= 4
+                && (hasTitle || (hasLessor && hasLessee))
+                && (hasPeriod || hasRent || hasHouse);
     }
 
     // ==================== 表单类型识别 ====================
@@ -1315,6 +1320,15 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             }
         } catch (Exception ignore) {}
         return "";
+    }
+
+    private void throwOcrRecognitionFailed(OcrResult ocrResult) {
+        String detail = ocrResult != null ? ocrResult.getErrorMessage() : null;
+        if (StrUtil.isBlank(detail) && ocrResult != null) {
+            detail = ocrResult.getNotice();
+        }
+        throw new ServiceException(OCR_RECOGNITION_FAILED.getCode(),
+                "OCR 识别失败：" + StrUtil.blankToDefault(detail, "未返回具体原因"));
     }
 
     private void updateImportRecord(ImportRecordDO importRecord, String detectedFormType, String status) {

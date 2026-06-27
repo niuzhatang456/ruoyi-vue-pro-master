@@ -326,12 +326,22 @@ public class JijianQueryChatServiceImpl implements JijianQueryChatService {
     }
 
     private String resolveFormType(String aiFormType, JijianQueryChatReqVO req) {
+        String messageFormType = inferFormType(req.getMessage());
         if (req.getFormType() != null && !req.getFormType().isBlank()) {
-            return normalizeSupportedFormType(req.getFormType());
+            String requestFormType = normalizeSupportedFormType(req.getFormType());
+            if (messageFormType == null
+                    || requestFormType == null
+                    || messageFormType.equals(requestFormType)
+                    || !JijianQueryFormTypeEnum.ATTENDANCE_DAILY.getValue().equals(requestFormType)) {
+                return requestFormType;
+            }
+        }
+        if (messageFormType != null) {
+            return normalizeSupportedFormType(messageFormType);
         }
         String candidate = aiFormType;
         if (candidate == null || candidate.isBlank()) {
-            candidate = inferFormType(req.getMessage());
+            candidate = messageFormType;
         }
         if ((candidate == null || candidate.isBlank()) && req.getHistory() != null) {
             int start = Math.max(0, req.getHistory().size() - 12);

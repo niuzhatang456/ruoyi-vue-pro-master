@@ -124,10 +124,11 @@ const handleFileChange = (_file: UploadFile, fileList: UploadFiles) => {
   uploadTimer = setTimeout(() => {
     const files = fileList
       .map((f) => f.raw)
-      .filter((f): f is File => Boolean(f))
+      .filter((f) => f != null) as File[]
+    const pendingFiles = files
       .filter((f) => !fileResults.value.some((r) => r.fileName === f.name && !r.loading))
-    if (files.length === 0) return
-    uploadFiles(files)
+    if (pendingFiles.length === 0) return
+    uploadFiles(pendingFiles)
   }, 200)
 }
 
