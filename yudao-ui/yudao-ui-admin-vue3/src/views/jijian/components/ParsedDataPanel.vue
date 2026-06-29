@@ -276,6 +276,8 @@ type LeaseRentItem = {
   rentAmount: string
 }
 
+type HeaderDef = { name: string; index: number }
+
 // ── 常量 ────────────────────────────────────────────────────────────────────
 /** 每页展示行数（Vue 响应式对象上限）。超过此值时启用分页预览。 */
 const PAGE_SIZE = 100
@@ -295,8 +297,9 @@ const emit = defineEmits<{
 }>()
 
 // ── 非响应式全量存储（避免 Vue 深度代理 15000+ 行对象导致卡死） ─────────────
-// 这是一个模块级普通数组，不被 Vue 跟踪，切换 parsedData 时手动清空重建。
-let _allRowsRaw: Record<string, string>[] = []
+// 这是普通变量，不被 Vue 跟踪；只把当前页浅拷贝进 tableRows。
+let _allRowsRaw: unknown[] = []
+let _headerDefsRaw: HeaderDef[] = []
 
 // ── 响应式状态 ──────────────────────────────────────────────────────────────
 const confirming      = ref(false)
@@ -431,7 +434,7 @@ const jsonPreview = computed(() => {
 
 // ── 数据初始化 ──────────────────────────────────────────────────────────────
 
-function normalizeHeaders(headers: unknown[]): { name: string; index: number }[] {
+function normalizeHeaders(headers: unknown[]): HeaderDef[] {
   const seen = new Map<string, number>()
   return headers
     .map((header, index) => ({ name: header == null ? '' : String(header).trim(), index }))
@@ -457,6 +460,7 @@ function initEditableData() {
   activeTab.value     = 'table'
   currentPage.value   = 1
   _allRowsRaw         = []   // 清空非响应式存储
+  _headerDefsRaw      = []
 
   const source = props.parsedData?.correctedJson || props.parsedData?.parsedJson
   if (!source) return
@@ -472,20 +476,11 @@ function initEditableData() {
             ? firstRow.map((_: unknown, i: number) => `列${i + 1}`)
             : Object.keys(firstRow))
       const headerDefs = normalizeHeaders(sourceHeaders)
+      _headerDefsRaw = headerDefs
       tableHeaders.value = headerDefs.map(({ name }) => name)
 
-      // 全量数据存入非响应式数组（不创建 Vue Proxy，避免 15000+ 行卡死）
-      _allRowsRaw = obj.rows.map((row: unknown) => {
-        if (Array.isArray(row)) {
-          return Object.fromEntries(
-            headerDefs.map(({ name, index }) => [name, row[index] == null ? '' : String(row[index])])
-          )
-        }
-        const record = row as Record<string, unknown>
-        return Object.fromEntries(
-          Object.entries(record).map(([k, v]) => [k, v == null ? '' : String(v)])
-        )
-      })
+      // 全量 rows 只保留在非响应式普通数组中，不做整表 map/copy。
+      _allRowsRaw = obj.rows
       totalRowCount.value = _allRowsRaw.length
 
       // 仅将第一页放入响应式状态
@@ -514,7 +509,7 @@ function initEditableData() {
 }
 
 function initLeaseContractEditor(parsedObj: Record<string, any>) {
-  const row = _allRowsRaw[0] || {}
+  const row = rowToRecord(_allRowsRaw[0])
   const fields: Array<Omit<LeaseField, 'value'>> = [
     { key: '合同编号', label: '合同编号' },
     { key: '合同签订日期', label: '合同签订日期' },
@@ -567,7 +562,7 @@ function parseLeaseRentItems(row: Record<string, string>, parsedObj: Record<stri
 
 function syncLeaseContractToRows(base?: Record<string, any>) {
   if (!isLeaseContractPreview.value || _allRowsRaw.length === 0) return
-  const row = { ..._allRowsRaw[0] }
+  const row = rowToRecord(_allRowsRaw[0])
   for (const field of leaseFields.value) {
     row[field.key] = field.value || ''
   }
@@ -616,7 +611,22 @@ function buildLeaseHeaders(rentCount: number): string[] {
 function loadPage(page: number) {
   const start = (page - 1) * PAGE_SIZE
   const end   = Math.min(start + PAGE_SIZE, _allRowsRaw.length)
-  tableRows.value = _allRowsRaw.slice(start, end).map(r => ({ ...r }))
+  tableRows.value = _allRowsRaw.slice(start, end).map(rowToRecord)
+}
+
+function rowToRecord(row: unknown): Record<string, string> {
+  if (Array.isArray(row)) {
+    return Object.fromEntries(
+      _headerDefsRaw.map(({ name, index }) => [name, row[index] == null ? '' : String(row[index])])
+    )
+  }
+  if (row && typeof row === 'object') {
+    const record = row as Record<string, unknown>
+    return Object.fromEntries(
+      Object.entries(record).map(([k, v]) => [k, v == null ? '' : String(v)])
+    )
+  }
+  return {}
 }
 
 /**
@@ -720,7 +730,7 @@ async function handleSaveCorrection() {
     }
     if (_allRowsRaw.length > 0) {
       base.headers   = tableHeaders.value
-      base.rows      = [..._allRowsRaw]   // 完整数据（非响应式副本）
+      base.rows      = _allRowsRaw.map(rowToRecord)   // 保存时才重建完整数据
       base.totalRows = _allRowsRaw.length
     } else if (kvFields.value.length > 0) {
       base.textPreview = kvFields.value.map(kv => `${kv.key}：${kv.value}`).join('\n')

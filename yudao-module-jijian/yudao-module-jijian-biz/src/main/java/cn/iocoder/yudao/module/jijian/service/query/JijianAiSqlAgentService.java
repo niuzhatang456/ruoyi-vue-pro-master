@@ -26,8 +26,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -162,17 +164,36 @@ public class JijianAiSqlAgentService {
             messages.add(msg("user", aggrContextJson));
         }
 
+        List<JijianAnalysisTableVO> rawDataTables = new ArrayList<>();
+
+        // ── 合同到期预查：由后端按 LocalDate.now() 计算，禁止模型猜日期 ──
+        long contractStart = System.currentTimeMillis();
+        ContractExpiryContext contractExpiryContext = buildContractExpiryContextIfNeeded(userMessage, sqlTrace);
+        sqlElapsedTotal += System.currentTimeMillis() - contractStart;
+        String contractExpiryContextJson = contractExpiryContext == null ? null : contractExpiryContext.contextJson;
+        if (contractExpiryContextJson != null) {
+            sqlRoundCount++;
+            messages.add(msg("user", contractExpiryContextJson));
+            rawDataTables.add(contractExpiryContext.table);
+        }
+
         String finalAnswer = null;
         List<JijianMetricVO> finalMetrics = Collections.emptyList();
         List<JijianChartVO> finalCharts = Collections.emptyList();
         List<JijianAnalysisTableVO> finalTables = Collections.emptyList();
-        List<JijianAnalysisTableVO> rawDataTables = new ArrayList<>();
 
+        // ── 合同到期类问题必须以后端 LocalDate.now() 计算结果为准，避免模型按日期误查考勤表 ──
+        if (contractExpiryContextJson != null) {
+            resp.setAiMode("LOCAL_FALLBACK");
+            finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson,
+                    aggrContextJson, contractExpiryContextJson, sqlTrace);
+        } else {
         // ── 若 DeepSeek 不可用，先检查能否直接用预查数据回答 ──
         boolean deepSeekEnabled = cfg.enabled && hasUsableKey(cfg.apiKey);
         if (!deepSeekEnabled) {
             resp.setAiMode(cfg.enabled && !hasUsableKey(cfg.apiKey) ? "DEEPSEEK_KEY_MISSING" : "LOCAL_FALLBACK");
-            finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson, aggrContextJson, sqlTrace);
+            finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson,
+                    aggrContextJson, contractExpiryContextJson, sqlTrace);
             if (finalAnswer == null) {
                 finalAnswer = cfg.enabled && !hasUsableKey(cfg.apiKey)
                         ? "DeepSeek API Key 未配置。请设置环境变量 DEEPSEEK_API_KEY 后重启后端；本次未调用外部大模型。"
@@ -211,7 +232,8 @@ public class JijianAiSqlAgentService {
                     log.warn("[SqlAgent] DeepSeek call failed at round {}: {}", round, dsException.getMessage());
                     resp.setAiMode("LOCAL_FALLBACK");
                     // DeepSeek 失败时尝试用预查数据回答
-                    finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson, aggrContextJson, sqlTrace);
+                    finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson,
+                            aggrContextJson, contractExpiryContextJson, sqlTrace);
                     if (finalAnswer == null) {
                         finalAnswer = "AI 分析服务调用失败（" + dsException.getMessage() + "），请稍后重试。";
                     }
@@ -332,10 +354,12 @@ public class JijianAiSqlAgentService {
                     }
                 } catch (Exception e) {
                     deepSeekElapsedTotal += System.currentTimeMillis() - dsStart;
-                    finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson, aggrContextJson, sqlTrace);
+                    finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson,
+                            aggrContextJson, contractExpiryContextJson, sqlTrace);
                     if (finalAnswer == null) finalAnswer = "分析完成，请查看下方 SQL 查询记录。";
                 }
             }
+        }
         }
 
         long totalElapsed = System.currentTimeMillis() - totalStart;
@@ -406,7 +430,12 @@ public class JijianAiSqlAgentService {
                                            String preResolvedContextJson,
                                            String recentImportContextJson,
                                            String aggrContextJson,
+                                           String contractExpiryContextJson,
                                            List<JijianSqlTraceVO> sqlTrace) {
+        // 0. 合同到期（必须优先使用后端 LocalDate.now() 计算结果）
+        if (contractExpiryContextJson != null) {
+            return buildFallbackFromContractExpiry(contractExpiryContextJson);
+        }
         // 1. 聚合查询（缺勤/部门）
         if (aggrContextJson != null) {
             return buildFallbackFromAggr(userMessage, aggrContextJson);
@@ -420,6 +449,44 @@ public class JijianAiSqlAgentService {
             return buildFallbackFromPerson(userMessage, preResolvedContextJson);
         }
         return null;
+    }
+
+    private String buildFallbackFromContractExpiry(String contextJson) {
+        try {
+            JsonNode node = objectMapper.readTree(contextJson);
+            String currentDate = node.path("currentDate").asText(LocalDate.now().toString());
+            JsonNode contracts = node.path("contracts");
+            if (!contracts.isArray() || contracts.size() == 0) {
+                return "截至 " + currentDate + "，未查到包含合同到期日的租赁合同记录。";
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("按系统当前日期 ").append(currentDate).append(" 判断，合同到期情况如下：\n\n");
+            int limit = Math.min(contracts.size(), 10);
+            for (int i = 0; i < limit; i++) {
+                JsonNode row = contracts.get(i);
+                String contractId = row.path("id").asText("-");
+                String endDate = row.path("contractEndDate").asText("-");
+                boolean expired = row.path("expired").asBoolean(false);
+                long remainingDays = row.path("remainingDays").asLong(0L);
+                long overdueDays = row.path("overdueDays").asLong(0L);
+                sb.append("- 合同 ID：").append(contractId)
+                        .append("，到期日：").append(endDate)
+                        .append("，状态：").append(expired ? "已过期" : "仍在有效期内");
+                if (expired) {
+                    sb.append("，已过期 ").append(overdueDays).append(" 天");
+                } else {
+                    sb.append("，距离到期 ").append(remainingDays).append(" 天");
+                }
+                sb.append("\n");
+            }
+            if (contracts.size() > limit) {
+                sb.append("\n仅展示前 ").append(limit).append(" 条，完整数据见下方数据库返回数据。");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("[SqlAgent] buildFallbackFromContractExpiry failed: {}", e.getMessage());
+            return null;
+        }
     }
 
     private String buildFallbackFromPerson(String userMessage, String contextJson) {
@@ -659,11 +726,102 @@ public class JijianAiSqlAgentService {
         return null;
     }
 
+    private ContractExpiryContext buildContractExpiryContextIfNeeded(String userMessage, List<JijianSqlTraceVO> sqlTrace) {
+        if (userMessage == null) return null;
+        boolean asked = (containsTerm(userMessage, 0x5408, 0x540c) || containsTerm(userMessage, 0x79df, 0x8d41))
+                && (containsTerm(userMessage, 0x5230, 0x671f) || containsTerm(userMessage, 0x8fc7, 0x671f)
+                || containsTerm(userMessage, 0x6709, 0x6548, 0x671f) || containsTerm(userMessage, 0x6709, 0x6548));
+        if (!asked) return null;
+
+        String sql = "SELECT id, contract_no, lessor_name, lessee_name, lease_start_date, lease_end_date, "
+                + "rent_info_json, original_file_name, original_file_url, remark "
+                + "FROM jijian_lease_contract "
+                + "WHERE deleted = 0 AND lease_end_date IS NOT NULL "
+                + "ORDER BY lease_end_date ASC LIMIT 100";
+        QueryResult qr = sqlExecutor.execute(sql);
+
+        JijianSqlTraceVO trace = new JijianSqlTraceVO();
+        trace.setPurpose("[contractExpiry] 合同到期状态预查");
+        trace.setSql(sql);
+        trace.setRowCount(qr.getTotalRowCount());
+        trace.setExecutedAt(LocalDateTime.now().format(TRACE_DT_FMT));
+        trace.setSource("contract_expiry_prequery");
+        if (!qr.isSuccess()) {
+            trace.setError(qr.getErrorMessage());
+            sqlTrace.add(trace);
+            return null;
+        }
+        sqlTrace.add(trace);
+
+        LocalDate today = LocalDate.now();
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("type", "contractExpiryContext");
+        node.put("note", "后端已按系统当前日期计算合同是否过期；DeepSeek 必须使用这些字段，不得自行猜测当前日期。");
+        node.put("currentDate", today.toString());
+        ArrayNode contracts = node.putArray("contracts");
+        List<Map<String, Object>> tableRows = new ArrayList<>();
+
+        for (Map<String, Object> row : qr.getRows()) {
+            LocalDate endDate = firstDate(row.get("lease_end_date"), null);
+            if (endDate == null) continue;
+            ContractExpiryStatus status = calculateContractExpiry(today, endDate);
+
+            Map<String, Object> tableRow = new LinkedHashMap<>();
+            tableRow.put("id", row.get("id"));
+            tableRow.put("contract_no", row.get("contract_no"));
+            tableRow.put("lessor_name", row.get("lessor_name"));
+            tableRow.put("lessee_name", row.get("lessee_name"));
+            tableRow.put("current_date", today.toString());
+            tableRow.put("contract_start_time", valueToString(row.get("lease_start_date"), null));
+            tableRow.put("contract_end_date", endDate.toString());
+            tableRow.put("expiry_status", status.expired ? "已过期" : "仍在有效期内");
+            tableRow.put("remaining_days", status.remainingDays);
+            tableRow.put("overdue_days", status.overdueDays);
+            tableRow.put("rent_info_json", row.get("rent_info_json"));
+            tableRow.put("original_file_name", row.get("original_file_name"));
+            tableRow.put("original_file_url", row.get("original_file_url"));
+            tableRow.put("remark", row.get("remark"));
+            tableRows.add(tableRow);
+
+            ObjectNode contract = contracts.addObject();
+            tableRow.forEach((k, v) -> putJsonValue(contract, k, v));
+            contract.put("contractEndDate", endDate.toString());
+            contract.put("expired", status.expired);
+            contract.put("remainingDays", status.remainingDays);
+            contract.put("overdueDays", status.overdueDays);
+        }
+
+        List<Map<String, String>> columns = new ArrayList<>();
+        if (!tableRows.isEmpty()) {
+            for (String column : tableRows.get(0).keySet()) {
+                Map<String, String> col = new LinkedHashMap<>();
+                col.put("key", column);
+                col.put("label", column);
+                columns.add(col);
+            }
+        }
+
+        try {
+            return new ContractExpiryContext(
+                    objectMapper.writeValueAsString(node),
+                    JijianAnalysisTableVO.builder()
+                            .title("合同到期状态（按 " + today + " 判断）")
+                            .columns(columns)
+                            .rows(tableRows)
+                            .build()
+            );
+        } catch (Exception e) {
+            log.warn("[SqlAgent] contract expiry context serialization failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
     // ===== 系统 Prompt =====
 
     private String buildSystemPrompt() {
         return "你是纪检信息系统的 AI 数据分析助手（SQL Agent 模式）。\n"
                 + "通过执行只读 SQL 查询本地业务数据库获取真实数据，然后基于真实数据进行分析。\n"
+                + "当前系统日期：" + LocalDate.now() + "。合同到期/有效期判断必须以该日期为准：结束日期早于当前日期即已过期。\n"
                 + "\n"
                 + "【数据库 schema】\n"
                 + schemaProvider.schemaJson() + "\n"
@@ -677,6 +835,7 @@ public class JijianAiSqlAgentService {
                 + "6. 若查询结果为空，必须明确说明查不到\n"
                 + "7. 禁止输出手机号、身份证等敏感字段\n"
                 + "8. 多表 JOIN 时每张表都必须使用别名并分别添加 alias.deleted = 0\n"
+                + "9. 回答合同是否过期时，必须优先使用后端提供的 contractExpiryContext 中 currentDate、contractEndDate、expired、remainingDays、overdueDays 字段\n"
                 + "\n"
                 + "【回复格式】每次回复只能是以下两种 JSON 之一：\n"
                 + "格式 A：{\"action\":\"query\",\"purpose\":\"查询目的\",\"sql\":\"SELECT ...\"}\n"
@@ -950,6 +1109,10 @@ public class JijianAiSqlAgentService {
         if (rawMessage.contains("民生") || rawMessage.contains("价格公告") || rawMessage.contains("采价点") || rawMessage.contains("价格对比")) {
             hints.add("优先查 jijian_canteen_market_price（民生商品价格公告，字段：item_name/spec_level/unit/price/price_point/price_month），按 item_name 和 price_month 做同商品同月对比");
         }
+        if (containsTerm(rawMessage, 0x5408, 0x540c) || containsTerm(rawMessage, 0x79df, 0x8d41)
+                || containsTerm(rawMessage, 0x5230, 0x671f) || containsTerm(rawMessage, 0x8fc7, 0x671f)) {
+            hints.add("优先查 jijian_lease_contract（租赁合同，字段：contract_no/lessor_name/lessee_name/lease_start_date/lease_end_date/original_file_url），合同到期状态以后端 contractExpiryContext 为准");
+        }
         if (rawMessage.contains("调休") || rawMessage.contains("补休") || rawMessage.contains("调休时长")) {
             hints.add("优先查 jijian_compensatory_leave（调休/加班，字段：applicant_name/overtime_start_time/compensatory_start_time/compensatory_duration）");
         }
@@ -1037,8 +1200,12 @@ public class JijianAiSqlAgentService {
         return userMessage + hint;
     }
 
+    private boolean containsTerm(String text, int... codePoints) {
+        return text != null && text.contains(new String(codePoints, 0, codePoints.length));
+    }
+
     private String preResolvePersonContext(JijianPersonNameUtils.ParseResult person,
-                                            List<JijianSqlTraceVO> sqlTrace) {
+                                           List<JijianSqlTraceVO> sqlTrace) {
         String[][] tableDefs = {
                 {"jijian_leave_health", "applicant_name", "employee_no"},
                 {"jijian_leave_personal", "applicant_name", "employee_no"},
@@ -1206,6 +1373,68 @@ public class JijianAiSqlAgentService {
     private String toJson(Object obj) {
         try { return objectMapper.writeValueAsString(obj); }
         catch (Exception e) { return "{}"; }
+    }
+
+    private LocalDate firstDate(Object primary, Object fallback) {
+        LocalDate date = toLocalDate(primary);
+        return date != null ? date : toLocalDate(fallback);
+    }
+
+    private LocalDate toLocalDate(Object value) {
+        if (value == null) return null;
+        if (value instanceof LocalDate) return (LocalDate) value;
+        if (value instanceof LocalDateTime) return ((LocalDateTime) value).toLocalDate();
+        if (value instanceof java.sql.Date) return ((java.sql.Date) value).toLocalDate();
+        if (value instanceof java.sql.Timestamp) return ((java.sql.Timestamp) value).toLocalDateTime().toLocalDate();
+        String text = value.toString().trim();
+        if (text.isBlank()) return null;
+        if (text.length() >= 10) text = text.substring(0, 10);
+        try {
+            return LocalDate.parse(text);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String valueToString(Object primary, Object fallback) {
+        Object value = primary != null ? primary : fallback;
+        return value == null ? "" : value.toString();
+    }
+
+    private void putJsonValue(ObjectNode node, String key, Object value) {
+        if (value == null) {
+            node.putNull(key);
+        } else {
+            node.put(key, value.toString());
+        }
+    }
+
+    static ContractExpiryStatus calculateContractExpiry(LocalDate today, LocalDate endDate) {
+        long remainingDays = ChronoUnit.DAYS.between(today, endDate);
+        boolean expired = endDate.isBefore(today);
+        return new ContractExpiryStatus(expired, Math.max(remainingDays, 0L), expired ? Math.abs(remainingDays) : 0L);
+    }
+
+    private static class ContractExpiryContext {
+        private final String contextJson;
+        private final JijianAnalysisTableVO table;
+
+        private ContractExpiryContext(String contextJson, JijianAnalysisTableVO table) {
+            this.contextJson = contextJson;
+            this.table = table;
+        }
+    }
+
+    static class ContractExpiryStatus {
+        final boolean expired;
+        final long remainingDays;
+        final long overdueDays;
+
+        ContractExpiryStatus(boolean expired, long remainingDays, long overdueDays) {
+            this.expired = expired;
+            this.remainingDays = remainingDays;
+            this.overdueDays = overdueDays;
+        }
     }
 
     private static class DeepSeekConfig {

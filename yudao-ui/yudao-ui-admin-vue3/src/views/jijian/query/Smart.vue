@@ -84,76 +84,6 @@
                   <el-tag :type="modeTagType(msg.aiMode)" size="small">{{ aiModeText(msg.aiMode) }}</el-tag>
                 </div>
 
-                <!-- 指标卡片 -->
-                <el-row v-if="msg.metrics && msg.metrics.length" :gutter="12" class="result-metrics">
-                  <el-col
-                    v-for="m in msg.metrics"
-                    :key="m.key"
-                    :xs="12"
-                    :sm="8"
-                    :md="6"
-                    class="mb-8px"
-                  >
-                    <div class="metric-card">
-                      <div class="metric-val">
-                        {{ m.value }}<span v-if="m.unit" class="metric-unit">{{ m.unit }}</span>
-                      </div>
-                      <div class="metric-label">{{ m.label }}</div>
-                    </div>
-                  </el-col>
-                </el-row>
-
-                <!-- 图表区（仅最新 AI 消息渲染，旧消息显示占位） -->
-                <div v-if="msg.charts && msg.charts.length">
-                  <el-row v-if="idx === latestAiIdx" :gutter="12" class="result-charts">
-                    <el-col
-                      v-for="(chart, ci) in msg.charts"
-                      :key="ci"
-                      :xs="24"
-                      :md="12"
-                      class="mb-12px"
-                    >
-                      <div class="chart-card">
-                        <div class="chart-title">{{ chart.title }}</div>
-                        <div :ref="(el) => setChartRef(el, ci)" class="chart-dom"></div>
-                      </div>
-                    </el-col>
-                  </el-row>
-                  <div v-else class="chart-placeholder">
-                    [包含 {{ msg.charts.length }} 张图表，切换至该对话可查看]
-                  </div>
-                </div>
-
-                <!-- 数据来源元信息 -->
-                <div v-if="msg.databaseContextMeta" class="db-meta">
-                  <span>数据来源：本地数据库只读查询</span>
-                  <span v-if="msg.databaseContextMeta.tablesUsed?.length">
-                    · 涉及表：{{ msg.databaseContextMeta.tablesUsed.join('、') }}
-                  </span>
-                  <span v-if="msg.databaseContextMeta.truncated" class="text-warning">
-                    · 数据量较大，已聚合展示
-                  </span>
-                </div>
-
-                <!-- SQL 查询痕迹（可折叠） -->
-                <div v-if="msg.sqlTrace && msg.sqlTrace.length" class="sql-trace-wrap">
-                  <div class="sql-trace-header" @click="msg.sqlTraceExpanded = !msg.sqlTraceExpanded">
-                    <span class="sql-trace-toggle">{{ msg.sqlTraceExpanded ? '▾' : '▸' }}</span>
-                    <span>只读查询审计（共 {{ msg.sqlTrace.length }} 次数据库查询）</span>
-                  </div>
-                  <div v-if="msg.sqlTraceExpanded" class="sql-trace-body">
-                    <div v-for="(t, ti) in msg.sqlTrace" :key="ti" class="sql-trace-item">
-                      <div class="sql-trace-purpose">
-                        <span class="sql-trace-idx">#{{ ti + 1 }}</span>
-                        {{ t.purpose }}
-                        <el-tag v-if="t.error" type="danger" size="small" class="ml-4px">失败</el-tag>
-                        <el-tag v-else type="success" size="small" class="ml-4px">{{ t.rowCount }} 行</el-tag>
-                      </div>
-                      <pre class="sql-trace-sql">{{ t.sql }}</pre>
-                      <div v-if="t.error" class="sql-trace-error">{{ t.error }}</div>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -333,7 +263,7 @@ const latestAiIdx = computed<number>(() => {
 const latestDatabaseMessageIndex = computed<number>(() => {
   const msgs = currentMessages.value
   for (let i = msgs.length - 1; i >= 0; i--) {
-    if (!msgs[i].loading && msgs[i].pageResult?.list?.length) return i
+    if (!msgs[i].loading && hasDatabaseRows(msgs[i])) return i
   }
   return -1
 })
@@ -343,12 +273,19 @@ const latestDatabaseMessage = computed<ChatMessage | null>(() =>
 )
 
 const latestDatabaseRows = computed<Array<Record<string, any>>>(() =>
-  latestDatabaseMessage.value?.pageResult?.list ?? []
+  latestDatabaseMessage.value?.pageResult?.list?.length
+    ? latestDatabaseMessage.value.pageResult.list
+    : (latestDatabaseMessage.value?.tables || []).find((table) => table.rows?.length)?.rows ?? []
 )
 
 const latestDatabaseColumns = computed<Array<{ key: string; label: string }>>(() =>
-  latestDatabaseMessage.value?.columns ?? []
+  latestDatabaseMessage.value?.pageResult?.list?.length
+    ? latestDatabaseMessage.value.columns ?? []
+    : (latestDatabaseMessage.value?.tables || []).find((table) => table.rows?.length)?.columns ?? []
 )
+
+const hasDatabaseRows = (msg?: ChatMessage): boolean =>
+  Boolean(msg?.pageResult?.list?.length || (msg?.tables || []).some((table) => table.rows?.length))
 
 const chatInput = ref('')
 const chatLoading = ref(false)
@@ -670,10 +607,6 @@ const scrollBottom = async () => {
 // ===== ECharts =====
 const chartRefs = ref<(HTMLElement | null)[]>([])
 const chartInstances: echarts.ECharts[] = []
-
-const setChartRef = (el: unknown, idx: number) => {
-  chartRefs.value[idx] = el as HTMLElement | null
-}
 
 const disposeCharts = () => {
   chartInstances.forEach((inst) => {

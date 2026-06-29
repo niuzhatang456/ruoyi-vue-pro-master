@@ -175,6 +175,7 @@ const redirect = ref<string>('')
 const loginLoading = ref(false)
 const verify = ref()
 const captchaType = ref('blockPuzzle') // blockPuzzle 滑块 clickWord 点击文字 pictureWord 文字验证码
+const defaultTenantName = import.meta.env.VITE_APP_DEFAULT_LOGIN_TENANT || '芋道源码'
 
 const getShow = computed(() => unref(getLoginState) === LoginStateEnum.LOGIN)
 
@@ -188,7 +189,7 @@ const loginData = reactive({
   captchaEnable: import.meta.env.VITE_APP_CAPTCHA_ENABLE,
   tenantEnable: import.meta.env.VITE_APP_TENANT_ENABLE,
   loginForm: {
-    tenantName: import.meta.env.VITE_APP_DEFAULT_LOGIN_TENANT || '',
+    tenantName: defaultTenantName,
     username: import.meta.env.VITE_APP_DEFAULT_LOGIN_USERNAME || '',
     password: import.meta.env.VITE_APP_DEFAULT_LOGIN_PASSWORD || '',
     captchaVerification: '',
@@ -217,8 +218,21 @@ const getCode = async () => {
 // 获取租户 ID
 const getTenantId = async () => {
   if (loginData.tenantEnable === 'true') {
+    normalizeTenantName()
     const res = await LoginApi.getTenantIdByName(loginData.loginForm.tenantName)
+    if (!res) {
+      throw new Error(`未找到租户「${loginData.loginForm.tenantName}」，请检查默认租户配置`)
+    }
     authUtil.setTenantId(res)
+  }
+}
+const normalizeTenantName = () => {
+  if (loginData.tenantEnable !== 'true') return
+  const tenantName = (loginData.loginForm.tenantName || '').trim()
+  if (!tenantName || /[�鑺嬮亾婧愮爜]/.test(tenantName)) {
+    loginData.loginForm.tenantName = defaultTenantName
+  } else {
+    loginData.loginForm.tenantName = tenantName
   }
 }
 // 记住我
@@ -232,6 +246,7 @@ const getLoginFormCache = () => {
       rememberMe: loginForm.rememberMe,
       tenantName: loginForm.tenantName ? loginForm.tenantName : loginData.loginForm.tenantName
     }
+    normalizeTenantName()
   }
 }
 // 根据域名，获得租户信息
@@ -250,11 +265,11 @@ const loading = ref() // ElLoading.service 返回的实例
 const handleLogin = async (params: any) => {
   loginLoading.value = true
   try {
-    await getTenantId()
     const data = await validForm()
     if (!data) {
       return
     }
+    await getTenantId()
     const loginDataLoginForm = { ...loginData.loginForm }
     loginDataLoginForm.captchaVerification = params.captchaVerification
     const res = await LoginApi.login(loginDataLoginForm)
@@ -281,9 +296,12 @@ const handleLogin = async (params: any) => {
     } else {
       await push({ path: redirect.value || permissionStore.addRouters[0].path })
     }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : '登录失败，请检查租户、账号和密码配置'
+    message.error(msg)
   } finally {
     loginLoading.value = false
-    loading.value.close()
+    loading.value?.close()
   }
 }
 
@@ -333,6 +351,7 @@ watch(
 )
 onMounted(() => {
   getLoginFormCache()
+  normalizeTenantName()
   getTenantByWebsite()
 })
 </script>
