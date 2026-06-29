@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.jijian.enums.FormTypeConstants;
 import cn.iocoder.yudao.module.jijian.service.confirm.AbstractConfirmWriteHandler;
 import cn.iocoder.yudao.module.jijian.service.confirm.ConfirmWriteResult;
 import cn.iocoder.yudao.module.jijian.util.JijianPersonNameUtils;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -107,6 +108,14 @@ public class LeaveHealthConfirmWriteHandler extends AbstractConfirmWriteHandler 
                         .sourceParsedDataId(parsedData.getId())
                         .build();
 
+                if (existsSameBusinessData(entity)) {
+                    skippedCount++;
+                    if (skippedMessages.size() < 20) {
+                        skippedMessages.add("绗?" + rowNum + " 琛岋細鏁版嵁搴撳凡瀛樺湪鐩稿悓鐤椾紤鍏昏鍋囨暟鎹紝宸茶烦杩?");
+                    }
+                    continue;
+                }
+
                 leaveHealthMapper.insert(entity);
                 if (entity.getId() != null) ids.add(entity.getId());
 
@@ -120,6 +129,14 @@ public class LeaveHealthConfirmWriteHandler extends AbstractConfirmWriteHandler 
         }
 
         if (ids.isEmpty()) {
+            if (skippedCount > 0 && failedMessages.isEmpty()) {
+                log.info("[LeaveHealthConfirmWrite] 鎬昏={} 鎴愬姛=0 璺宠繃={} 澶辫触=0",
+                        rows.size(), skippedCount);
+                return ConfirmWriteResult.ofWithStats(
+                        getFormType(), getBusinessTableName(), ids,
+                        rows.size(), skippedCount, skippedMessages,
+                        0, failedMessages);
+            }
             int shown = Math.min(failedMessages.size(), 5);
             String detail = failedMessages.isEmpty() ? "所有行均为空行或汇总行"
                     : String.join("；", failedMessages.subList(0, shown))
@@ -162,6 +179,21 @@ public class LeaveHealthConfirmWriteHandler extends AbstractConfirmWriteHandler 
      * 2. DateUtil.parse(s).toLocalDateTime() — 处理纯日期、中文日期等更多格式
      * 两步均失败时记录警告并返回 null（时间字段非强制必填）。
      */
+    private boolean existsSameBusinessData(LeaveHealthDO value) {
+        LambdaQueryWrapper<LeaveHealthDO> wrapper = new LambdaQueryWrapper<LeaveHealthDO>()
+                .eq(StrUtil.isNotBlank(value.getDepartment()), LeaveHealthDO::getDepartment, value.getDepartment())
+                .eq(LeaveHealthDO::getApplicantName, value.getApplicantName())
+                .eq(StrUtil.isNotBlank(value.getEmployeeNo()), LeaveHealthDO::getEmployeeNo, value.getEmployeeNo())
+                .eq(StrUtil.isNotBlank(value.getLeaveLocation()), LeaveHealthDO::getLeaveLocation, value.getLeaveLocation())
+                .eq(value.getStartTime() != null, LeaveHealthDO::getStartTime, value.getStartTime())
+                .eq(value.getEndTime() != null, LeaveHealthDO::getEndTime, value.getEndTime())
+                .eq(value.getLeaveDays() != null, LeaveHealthDO::getLeaveDays, value.getLeaveDays())
+                .eq(StrUtil.isNotBlank(value.getWorkYears()), LeaveHealthDO::getWorkYears, value.getWorkYears())
+                .eq(value.getStartWorkTime() != null, LeaveHealthDO::getStartWorkTime, value.getStartWorkTime())
+                .eq(StrUtil.isNotBlank(value.getRemark()), LeaveHealthDO::getRemark, value.getRemark());
+        return leaveHealthMapper.selectCount(wrapper) > 0;
+    }
+
     private LocalDateTime parseDateTime(String s, int rowNum, String fieldName, List<String> rowErrors) {
         if (StrUtil.isBlank(s)) return null;
         try {

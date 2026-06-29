@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.jijian.dal.mysql.compensatoryleave.CompensatoryLe
 import cn.iocoder.yudao.module.jijian.enums.FormTypeConstants;
 import cn.iocoder.yudao.module.jijian.service.confirm.AbstractConfirmWriteHandler;
 import cn.iocoder.yudao.module.jijian.service.confirm.ConfirmWriteResult;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -125,6 +126,14 @@ public class CompensatoryLeaveConfirmWriteHandler extends AbstractConfirmWriteHa
                         .remark(get(row, "备注", "说明", "原因", "调休原因"))
                         .sourceParsedDataId(parsedData.getId())
                         .build();
+                if (existsSameBusinessData(entity)) {
+                    skippedCount++;
+                    if (skippedMessages.size() < 20) {
+                        skippedMessages.add("绗?" + rowNum + " 琛岋細鏁版嵁搴撳凡瀛樺湪鐩稿悓璋冧紤鏁版嵁锛屽凡璺宠繃");
+                    }
+                    continue;
+                }
+
                 toInsert.add(entity);
 
             } catch (ServiceException se) {
@@ -138,6 +147,14 @@ public class CompensatoryLeaveConfirmWriteHandler extends AbstractConfirmWriteHa
 
         // 全部行均失败时抛出异常，告知前端详情
         if (toInsert.isEmpty()) {
+            if (skippedCount > 0 && failedMessages.isEmpty()) {
+                log.info("[CompensatoryConfirmWrite] 鎬昏={} 鎴愬姛=0 璺宠繃={} 澶辫触=0",
+                        rows.size(), skippedCount);
+                return ConfirmWriteResult.ofWithStats(
+                        getFormType(), getBusinessTableName(), new ArrayList<>(),
+                        rows.size(), skippedCount, skippedMessages,
+                        0, failedMessages);
+            }
             int shown = Math.min(failedMessages.size(), 5);
             String detail = failedMessages.isEmpty() ? "所有行均为空行或汇总行"
                     : String.join("；", failedMessages.subList(0, shown))
@@ -186,6 +203,26 @@ public class CompensatoryLeaveConfirmWriteHandler extends AbstractConfirmWriteHa
     /**
      * 解析日期时间字符串；失败时记录警告（不加入 rowErrors，时间字段非强制）。
      */
+    private boolean existsSameBusinessData(CompensatoryLeaveDO value) {
+        LambdaQueryWrapper<CompensatoryLeaveDO> wrapper = new LambdaQueryWrapper<CompensatoryLeaveDO>()
+                .eq(CompensatoryLeaveDO::getApplicantName, value.getApplicantName())
+                .eq(StrUtil.isNotBlank(value.getEmployeeNo()), CompensatoryLeaveDO::getEmployeeNo, value.getEmployeeNo())
+                .eq(StrUtil.isNotBlank(value.getDepartment()), CompensatoryLeaveDO::getDepartment, value.getDepartment())
+                .eq(value.getOvertimeStartTime() != null, CompensatoryLeaveDO::getOvertimeStartTime, value.getOvertimeStartTime())
+                .eq(StrUtil.isNotBlank(value.getOvertimeStartShift()), CompensatoryLeaveDO::getOvertimeStartShift, value.getOvertimeStartShift())
+                .eq(value.getOvertimeEndTime() != null, CompensatoryLeaveDO::getOvertimeEndTime, value.getOvertimeEndTime())
+                .eq(StrUtil.isNotBlank(value.getOvertimeEndShift()), CompensatoryLeaveDO::getOvertimeEndShift, value.getOvertimeEndShift())
+                .eq(value.getCompensatoryStartTime() != null, CompensatoryLeaveDO::getCompensatoryStartTime, value.getCompensatoryStartTime())
+                .eq(StrUtil.isNotBlank(value.getCompensatoryStartShift()), CompensatoryLeaveDO::getCompensatoryStartShift, value.getCompensatoryStartShift())
+                .eq(value.getCompensatoryEndTime() != null, CompensatoryLeaveDO::getCompensatoryEndTime, value.getCompensatoryEndTime())
+                .eq(StrUtil.isNotBlank(value.getCompensatoryEndShift()), CompensatoryLeaveDO::getCompensatoryEndShift, value.getCompensatoryEndShift())
+                .eq(StrUtil.isNotBlank(value.getCompensatoryDuration()), CompensatoryLeaveDO::getCompensatoryDuration, value.getCompensatoryDuration())
+                .eq(StrUtil.isNotBlank(value.getIsOutside()), CompensatoryLeaveDO::getIsOutside, value.getIsOutside())
+                .eq(StrUtil.isNotBlank(value.getOutsideLocation()), CompensatoryLeaveDO::getOutsideLocation, value.getOutsideLocation())
+                .eq(StrUtil.isNotBlank(value.getRemark()), CompensatoryLeaveDO::getRemark, value.getRemark());
+        return compensatoryLeaveMapper.selectCount(wrapper) > 0;
+    }
+
     private LocalDateTime parseDateTime(String s, int rowNum, String fieldName, List<String> rowErrors) {
         if (StrUtil.isBlank(s)) {
             return null;

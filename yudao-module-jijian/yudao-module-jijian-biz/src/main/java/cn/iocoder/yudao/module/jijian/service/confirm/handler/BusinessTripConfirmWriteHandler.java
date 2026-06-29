@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.jijian.enums.FormTypeConstants;
 import cn.iocoder.yudao.module.jijian.service.confirm.AbstractConfirmWriteHandler;
 import cn.iocoder.yudao.module.jijian.service.confirm.ConfirmWriteResult;
 import cn.iocoder.yudao.module.jijian.util.JijianPersonNameUtils;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -132,6 +133,14 @@ public class BusinessTripConfirmWriteHandler extends AbstractConfirmWriteHandler
                         .sourceParsedDataId(parsedData.getId())
                         .build();
 
+                if (existsSameBusinessData(entity)) {
+                    skippedCount++;
+                    if (skippedMessages.size() < 20) {
+                        skippedMessages.add("绗?" + rowNum + " 琛岋細鏁版嵁搴撳凡瀛樺湪鐩稿悓鍑哄樊鏁版嵁锛屽凡璺宠繃");
+                    }
+                    continue;
+                }
+
                 businessTripMapper.insert(entity);
                 if (entity.getId() != null) ids.add(entity.getId());
 
@@ -145,6 +154,12 @@ public class BusinessTripConfirmWriteHandler extends AbstractConfirmWriteHandler
         }
 
         if (ids.isEmpty()) {
+            if (skippedCount > 0 && failedMessages.isEmpty()) {
+                log.info("[BusinessTripConfirmWrite] 鎬昏={} 鎴愬姛=0 璺宠繃={} 澶辫触=0",
+                        rows.size(), skippedCount);
+                return ConfirmWriteResult.ofWithStats(getFormType(), getBusinessTableName(), ids,
+                        rows.size(), skippedCount, skippedMessages, 0, failedMessages);
+            }
             String detail = failedMessages.isEmpty() ? "所有行均为空行"
                     : String.join("；", failedMessages.subList(0, Math.min(5, failedMessages.size())));
             throw new ServiceException(PARSED_DATA_REQUIRED_FIELD_MISSING.getCode(), "出差表全部行写入失败：" + detail);
@@ -168,6 +183,24 @@ public class BusinessTripConfirmWriteHandler extends AbstractConfirmWriteHandler
                     "记录ID", String.valueOf(d.getId())));
         }
         return result;
+    }
+
+    private boolean existsSameBusinessData(BusinessTripDO value) {
+        LambdaQueryWrapper<BusinessTripDO> wrapper = new LambdaQueryWrapper<BusinessTripDO>()
+                .eq(StrUtil.isNotBlank(value.getDepartment()), BusinessTripDO::getDepartment, value.getDepartment())
+                .eq(BusinessTripDO::getApplicantName, value.getApplicantName())
+                .eq(StrUtil.isNotBlank(value.getEmployeeNo()), BusinessTripDO::getEmployeeNo, value.getEmployeeNo())
+                .eq(StrUtil.isNotBlank(value.getTripReason()), BusinessTripDO::getTripReason, value.getTripReason())
+                .eq(StrUtil.isNotBlank(value.getDeparturePlace()), BusinessTripDO::getDeparturePlace, value.getDeparturePlace())
+                .eq(StrUtil.isNotBlank(value.getDestination()), BusinessTripDO::getDestination, value.getDestination())
+                .eq(value.getStartDate() != null, BusinessTripDO::getStartDate, value.getStartDate())
+                .eq(value.getEndDate() != null, BusinessTripDO::getEndDate, value.getEndDate())
+                .eq(value.getTripDays() != null, BusinessTripDO::getTripDays, value.getTripDays())
+                .eq(StrUtil.isNotBlank(value.getTripPersonnel()), BusinessTripDO::getTripPersonnel, value.getTripPersonnel())
+                .eq(value.getTripPeopleCount() != null, BusinessTripDO::getTripPeopleCount, value.getTripPeopleCount())
+                .eq(StrUtil.isNotBlank(value.getIsOutside()), BusinessTripDO::getIsOutside, value.getIsOutside())
+                .eq(StrUtil.isNotBlank(value.getOutsideLocation()), BusinessTripDO::getOutsideLocation, value.getOutsideLocation());
+        return businessTripMapper.selectCount(wrapper) > 0;
     }
 
     private Integer parsePeopleCount(String explicitCount, String tripPersonnel) {

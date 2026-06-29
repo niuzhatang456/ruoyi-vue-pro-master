@@ -166,6 +166,14 @@ public class JijianAiSqlAgentService {
 
         List<JijianAnalysisTableVO> rawDataTables = new ArrayList<>();
 
+        PropertyLeaseContext propertyLeaseContext = buildPropertyLeaseContextIfNeeded(userMessage, sqlTrace);
+        String propertyLeaseContextJson = propertyLeaseContext == null ? null : propertyLeaseContext.contextJson;
+        if (propertyLeaseContextJson != null) {
+            sqlRoundCount++;
+            messages.add(msg("user", propertyLeaseContextJson));
+            rawDataTables.add(propertyLeaseContext.table);
+        }
+
         // ── 合同到期预查：由后端按 LocalDate.now() 计算，禁止模型猜日期 ──
         long contractStart = System.currentTimeMillis();
         ContractExpiryContext contractExpiryContext = buildContractExpiryContextIfNeeded(userMessage, sqlTrace);
@@ -187,6 +195,9 @@ public class JijianAiSqlAgentService {
             resp.setAiMode("LOCAL_FALLBACK");
             finalAnswer = generateFallbackAnswer(userMessage, preResolvedContextJson, recentImportContextJson,
                     aggrContextJson, contractExpiryContextJson, sqlTrace);
+        } else if (propertyLeaseContextJson != null) {
+            resp.setAiMode("LOCAL_FALLBACK");
+            finalAnswer = buildFallbackFromPropertyLease(propertyLeaseContextJson);
         } else {
         // ── 若 DeepSeek 不可用，先检查能否直接用预查数据回答 ──
         boolean deepSeekEnabled = cfg.enabled && hasUsableKey(cfg.apiKey);
@@ -818,6 +829,126 @@ public class JijianAiSqlAgentService {
 
     // ===== 系统 Prompt =====
 
+    private PropertyLeaseContext buildPropertyLeaseContextIfNeeded(String userMessage, List<JijianSqlTraceVO> sqlTrace) {
+        if (userMessage == null) return null;
+        boolean asked = (containsTerm(userMessage, 0x623f, 0x4ea7)
+                || containsTerm(userMessage, 0x51fa, 0x79df)
+                || containsTerm(userMessage, 0x79df, 0x8d41))
+                && (containsTerm(userMessage, 0x60c5, 0x51b5)
+                || containsTerm(userMessage, 0x660e, 0x7ec6)
+                || containsTerm(userMessage, 0x5217, 0x8868)
+                || containsTerm(userMessage, 0x67e5, 0x8be2));
+        if (!asked) return null;
+
+        String sql = "SELECT id, contract_no, lessor_name, lessee_name, lease_start_date, lease_end_date, "
+                + "rent_info_json, original_file_name, original_file_url, remark "
+                + "FROM jijian_lease_contract "
+                + "WHERE deleted = 0 "
+                + "ORDER BY lease_end_date DESC, id DESC LIMIT 100";
+        QueryResult qr = sqlExecutor.execute(sql);
+
+        JijianSqlTraceVO trace = new JijianSqlTraceVO();
+        trace.setPurpose("[propertyLease] 房产出租情况预查询");
+        trace.setSql(sql);
+        trace.setRowCount(qr.getTotalRowCount());
+        trace.setExecutedAt(LocalDateTime.now().format(TRACE_DT_FMT));
+        trace.setSource("property_lease_prequery");
+        if (!qr.isSuccess()) {
+            trace.setError(qr.getErrorMessage());
+            sqlTrace.add(trace);
+            return null;
+        }
+        sqlTrace.add(trace);
+
+        LocalDate today = LocalDate.now();
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("type", "propertyLeaseContext");
+        node.put("currentDate", today.toString());
+        ArrayNode contracts = node.putArray("contracts");
+        List<Map<String, Object>> tableRows = new ArrayList<>();
+
+        for (Map<String, Object> row : qr.getRows()) {
+            LocalDate endDate = firstDate(row.get("lease_end_date"), null);
+            ContractExpiryStatus status = endDate == null ? null : calculateContractExpiry(today, endDate);
+
+            Map<String, Object> tableRow = new LinkedHashMap<>();
+            tableRow.put("id", row.get("id"));
+            tableRow.put("contract_no", row.get("contract_no"));
+            tableRow.put("lessor_name", row.get("lessor_name"));
+            tableRow.put("lessee_name", row.get("lessee_name"));
+            tableRow.put("lease_start_date", valueToString(row.get("lease_start_date"), null));
+            tableRow.put("lease_end_date", endDate == null ? null : endDate.toString());
+            tableRow.put("lease_status", status == null ? "未填写到期日" : (status.expired ? "已过期" : "仍在有效期内"));
+            tableRow.put("remaining_days", status == null ? null : status.remainingDays);
+            tableRow.put("overdue_days", status == null ? null : status.overdueDays);
+            tableRow.put("rent_info_json", row.get("rent_info_json"));
+            tableRow.put("original_file_name", row.get("original_file_name"));
+            tableRow.put("original_file_url", row.get("original_file_url"));
+            tableRow.put("remark", row.get("remark"));
+            tableRows.add(tableRow);
+
+            ObjectNode contract = contracts.addObject();
+            tableRow.forEach((k, v) -> putJsonValue(contract, k, v));
+        }
+
+        List<Map<String, String>> columns = new ArrayList<>();
+        if (!tableRows.isEmpty()) {
+            for (String column : tableRows.get(0).keySet()) {
+                Map<String, String> col = new LinkedHashMap<>();
+                col.put("key", column);
+                col.put("label", column);
+                columns.add(col);
+            }
+        }
+
+        try {
+            return new PropertyLeaseContext(
+                    objectMapper.writeValueAsString(node),
+                    JijianAnalysisTableVO.builder()
+                            .title("房产出租情况（按系统日期 " + today + " 判断）")
+                            .columns(columns)
+                            .rows(tableRows)
+                            .build()
+            );
+        } catch (Exception e) {
+            log.warn("[SqlAgent] property lease context serialization failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String buildFallbackFromPropertyLease(String contextJson) {
+        try {
+            JsonNode node = objectMapper.readTree(contextJson);
+            String currentDate = node.path("currentDate").asText(LocalDate.now().toString());
+            JsonNode contracts = node.path("contracts");
+            if (!contracts.isArray() || contracts.size() == 0) {
+                return "截至 " + currentDate + "，未查询到房产出租合同记录。";
+            }
+            int expiredCount = 0;
+            int activeCount = 0;
+            for (JsonNode row : contracts) {
+                String status = row.path("lease_status").asText("");
+                if ("已过期".equals(status)) expiredCount++;
+                if ("仍在有效期内".equals(status)) activeCount++;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("当前使用规则查询，未调用 DeepSeek。按系统当前日期 ")
+                    .append(currentDate)
+                    .append(" 查询房产出租情况：共 ")
+                    .append(contracts.size())
+                    .append(" 份租赁合同，其中仍在有效期内 ")
+                    .append(activeCount)
+                    .append(" 份，已过期 ")
+                    .append(expiredCount)
+                    .append(" 份。数据库明细已在下方独立数据区域展示。");
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("[SqlAgent] buildFallbackFromPropertyLease failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
     private String buildSystemPrompt() {
         return "你是纪检信息系统的 AI 数据分析助手（SQL Agent 模式）。\n"
                 + "通过执行只读 SQL 查询本地业务数据库获取真实数据，然后基于真实数据进行分析。\n"
@@ -1413,6 +1544,16 @@ public class JijianAiSqlAgentService {
         long remainingDays = ChronoUnit.DAYS.between(today, endDate);
         boolean expired = endDate.isBefore(today);
         return new ContractExpiryStatus(expired, Math.max(remainingDays, 0L), expired ? Math.abs(remainingDays) : 0L);
+    }
+
+    private static class PropertyLeaseContext {
+        private final String contextJson;
+        private final JijianAnalysisTableVO table;
+
+        private PropertyLeaseContext(String contextJson, JijianAnalysisTableVO table) {
+            this.contextJson = contextJson;
+            this.table = table;
+        }
     }
 
     private static class ContractExpiryContext {
