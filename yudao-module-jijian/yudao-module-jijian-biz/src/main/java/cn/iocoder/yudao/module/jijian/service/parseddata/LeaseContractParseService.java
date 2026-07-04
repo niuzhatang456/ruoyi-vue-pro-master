@@ -40,6 +40,7 @@ public class LeaseContractParseService {
     private static final Pattern ID_CARD = Pattern.compile(
             "[1-9]\\d{5}(18|19|20)\\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\\d|3[01])\\d{3}[\\dXx]");
     private static final Pattern MOBILE = Pattern.compile("1[3-9]\\d{9}");
+    private static final Pattern CONTACT_PHONE = Pattern.compile("1[3-9]\\d{9}|0\\d{2,3}\\s*[-—－]{1,2}\\s*\\d{7,8}");
     private static final String DATE_REGEX = "\\d{4}\\s*[年\\-/\\.]\\s*\\d{1,2}\\s*[月\\-/\\.]\\s*\\d{1,2}\\s*[日号]?";
     private static final Pattern CHINESE_DATE = Pattern.compile("(\\d{4})\\s*年\\s*(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*[日号]?");
     private static final Pattern NUMERIC_DATE = Pattern.compile("(\\d{4})\\s*[-/\\.]\\s*(\\d{1,2})\\s*[-/\\.]\\s*(\\d{1,2})");
@@ -301,9 +302,9 @@ public class LeaseContractParseService {
         }
         String best = "";
         int bestScore = Integer.MIN_VALUE;
-        Matcher matcher = MOBILE.matcher(text);
+        Matcher matcher = CONTACT_PHONE.matcher(text);
         while (matcher.find()) {
-            String candidate = matcher.group();
+            String candidate = normalizePhone(matcher.group());
             if (containedByAny(candidate, idCards)) {
                 continue;
             }
@@ -337,9 +338,9 @@ public class LeaseContractParseService {
                 continue;
             }
             String window = text.substring(idx, Math.min(text.length(), idx + 140));
-            Matcher matcher = MOBILE.matcher(window);
+            Matcher matcher = CONTACT_PHONE.matcher(window);
             if (matcher.find()) {
-                return matcher.group();
+                return normalizePhone(matcher.group());
             }
         }
         return "";
@@ -589,6 +590,10 @@ public class LeaseContractParseService {
     private String firstMoney(String text) {
         Matcher matcher = MONEY_AMOUNT.matcher(text);
         return matcher.find() ? formatMoney(matcher.group(1)) : "";
+    }
+
+    private String normalizePhone(String raw) {
+        return StrUtil.blankToDefault(raw, "").replaceAll("\\s+", "").replaceAll("[-—－]{2,}", "-");
     }
 
     private String formatMoney(String raw) {

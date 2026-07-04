@@ -48,6 +48,19 @@ class LeaseContractParseServiceTest {
     }
 
     @Test
+    void shouldExtractLesseeFixedPhoneFromTailSignatureArea() {
+        Map<String, String> row = parse("租赁合同\n"
+                + "出租方：（以下简称甲方）义乌市融媒体中心\n"
+                + "承租方：（以下简称乙方）义乌广阔传媒有限公司\n"
+                + "房屋座落于义乌市江东东路33号。租赁期自2025年5月22日至2026年5月21日。房屋年租金为303000元。\n"
+                + "甲 方：义乌市融媒体中心 乙 方：义乌广阔传媒有限公司\n"
+                + "电 话： 电 话：0579--85516315\n"
+                + "签订日期：2025年5月21日");
+
+        assertEquals("0579-85516315", row.get("承租人联系电话"));
+    }
+
+    @Test
     void shouldParseAs20250007TwelveYearRentDetails() {
         Map<String, String> row = service.parse(
                 "AS20250007 乡镇站 综合楼出租合同(苏溪3-5层) 20250430.pdf",
