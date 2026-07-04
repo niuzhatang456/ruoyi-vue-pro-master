@@ -867,15 +867,11 @@ async function handleConfirm() {
 }
 .lease-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 16px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
 }
 .lease-form :deep(.el-form-item) {
   margin-bottom: 0;
-}
-.lease-form :deep(.el-form-item:nth-child(7)),
-.lease-form :deep(.el-form-item:nth-child(15)) {
-  grid-column: 1 / -1;
 }
 .lease-readonly {
   min-height: 24px;

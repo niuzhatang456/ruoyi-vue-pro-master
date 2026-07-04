@@ -114,7 +114,7 @@ public class LeaseContractDO extends TenantBaseDO {
         if (StrUtil.isBlank(rentText)) {
             return null;
         }
-        Matcher matcher = Pattern.compile("([0-9]+(?:[,，][0-9]{3})*(?:\\.[0-9]{1,2})?|[0-9]+)\\s*元").matcher(rentText);
+        Matcher matcher = Pattern.compile("([0-9]+(?:[,，][0-9]{3})*(?:\\.[0-9]{1,2})?|[0-9]+)\\s*元?").matcher(rentText);
         if (!matcher.find()) {
             return null;
         }

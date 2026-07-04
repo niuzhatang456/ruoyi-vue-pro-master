@@ -15,6 +15,7 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.stereotype.Component;
 import javax.annotation.Resource;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -93,10 +94,28 @@ public class LeaseContractConfirmWriteHandler extends AbstractConfirmWriteHandle
                             LeaseContractParseService.META_PARSE_ERROR_MSG, "parseErrorMsg"))
                     .sourceParsedDataId(parsedData.getId())
                     .build();
-            if (!dedupKeys.add(dedupKey(do_)) || existsSameBusinessData(do_)) {
+            if (!dedupKeys.add(dedupKey(do_))) {
                 skippedCount++;
                 if (skippedMessages.size() < 20) {
                     skippedMessages.add("第 " + rowNum + " 行：数据库已存在相同租赁合同数据，已跳过");
+                }
+                continue;
+            }
+            List<LeaseContractDO> sameBusinessData = findSameBusinessData(do_);
+            if (!sameBusinessData.isEmpty()) {
+                LeaseContractDO target = sameBusinessData.get(0);
+                boolean changed = mergeRicherFields(target, do_);
+                for (int j = 1; j < sameBusinessData.size(); j++) {
+                    LeaseContractDO duplicate = sameBusinessData.get(j);
+                    changed = mergeRicherFields(target, duplicate) || changed;
+                    leaseContractMapper.deleteById(duplicate.getId());
+                }
+                if (changed) {
+                    leaseContractMapper.updateById(target);
+                }
+                skippedCount++;
+                if (skippedMessages.size() < 20) {
+                    skippedMessages.add("绗?" + rowNum + " 琛岋細鏁版嵁搴撳凡瀛樺湪鐩稿悓绉熻祦鍚堝悓鏁版嵁锛屽凡璺宠繃");
                 }
                 continue;
             }
@@ -115,14 +134,121 @@ public class LeaseContractConfirmWriteHandler extends AbstractConfirmWriteHandle
                 + (value.getLeaseEndDate() == null ? "" : value.getLeaseEndDate());
     }
 
-    private boolean existsSameBusinessData(LeaseContractDO value) {
+    private List<LeaseContractDO> findSameBusinessData(LeaseContractDO value) {
+        if (StrUtil.isNotBlank(value.getContractNo())) {
+            return leaseContractMapper.selectList(new LambdaQueryWrapper<LeaseContractDO>()
+                    .eq(LeaseContractDO::getContractNo, value.getContractNo())
+                    .orderByAsc(LeaseContractDO::getId));
+        }
         LambdaQueryWrapper<LeaseContractDO> wrapper = new LambdaQueryWrapper<LeaseContractDO>()
-                .eq(StrUtil.isNotBlank(value.getContractNo()), LeaseContractDO::getContractNo, value.getContractNo())
                 .eq(StrUtil.isNotBlank(value.getLessorName()), LeaseContractDO::getLessorName, value.getLessorName())
                 .eq(StrUtil.isNotBlank(value.getLesseeName()), LeaseContractDO::getLesseeName, value.getLesseeName())
                 .eq(value.getLeaseStartDate() != null, LeaseContractDO::getLeaseStartDate, value.getLeaseStartDate())
                 .eq(value.getLeaseEndDate() != null, LeaseContractDO::getLeaseEndDate, value.getLeaseEndDate());
-        return leaseContractMapper.selectCount(wrapper) > 0;
+        return leaseContractMapper.selectList(wrapper);
+    }
+
+    private boolean mergeRicherFields(LeaseContractDO target, LeaseContractDO source) {
+        boolean changed = false;
+        if (StrUtil.isBlank(target.getContractNo()) && StrUtil.isNotBlank(source.getContractNo())) { target.setContractNo(source.getContractNo()); changed = true; }
+        if (StrUtil.isBlank(target.getLessorName()) && StrUtil.isNotBlank(source.getLessorName())) { target.setLessorName(source.getLessorName()); changed = true; }
+        if (StrUtil.isBlank(target.getLesseeName()) && StrUtil.isNotBlank(source.getLesseeName())) { target.setLesseeName(source.getLesseeName()); changed = true; }
+        if (StrUtil.isBlank(target.getLesseeIdCard()) && StrUtil.isNotBlank(source.getLesseeIdCard())) { target.setLesseeIdCard(source.getLesseeIdCard()); changed = true; }
+        if (StrUtil.isBlank(target.getLesseePhone()) && StrUtil.isNotBlank(source.getLesseePhone())) { target.setLesseePhone(source.getLesseePhone()); changed = true; }
+        if (target.getContractSignDate() == null && source.getContractSignDate() != null) { target.setContractSignDate(source.getContractSignDate()); changed = true; }
+        if (target.getLeaseStartDate() == null && source.getLeaseStartDate() != null) { target.setLeaseStartDate(source.getLeaseStartDate()); changed = true; }
+        if (target.getLeaseEndDate() == null && source.getLeaseEndDate() != null) { target.setLeaseEndDate(source.getLeaseEndDate()); changed = true; }
+        if (StrUtil.isBlank(target.getLeaseYears()) && StrUtil.isNotBlank(source.getLeaseYears())) { target.setLeaseYears(source.getLeaseYears()); changed = true; }
+        if (StrUtil.isBlank(target.getHouseCondition()) && StrUtil.isNotBlank(source.getHouseCondition())) { target.setHouseCondition(source.getHouseCondition()); changed = true; }
+        if (StrUtil.isBlank(target.getLeasePurpose()) && StrUtil.isNotBlank(source.getLeasePurpose())) { target.setLeasePurpose(source.getLeasePurpose()); changed = true; }
+        if (StrUtil.isBlank(target.getDeposit()) && StrUtil.isNotBlank(source.getDeposit())) { target.setDeposit(source.getDeposit()); changed = true; }
+        if (shouldReplaceFee(target.getWaterFee(), source.getWaterFee())) { target.setWaterFee(source.getWaterFee()); changed = true; }
+        if (shouldReplaceFee(target.getElectricityFee(), source.getElectricityFee())) { target.setElectricityFee(source.getElectricityFee()); changed = true; }
+        if (StrUtil.isBlank(target.getRemark()) && StrUtil.isNotBlank(source.getRemark())) { target.setRemark(source.getRemark()); changed = true; }
+        if (StrUtil.isBlank(target.getOriginalFileName()) && StrUtil.isNotBlank(source.getOriginalFileName())) { target.setOriginalFileName(source.getOriginalFileName()); changed = true; }
+        if (StrUtil.isBlank(target.getOriginalFileUrl()) && StrUtil.isNotBlank(source.getOriginalFileUrl())) { target.setOriginalFileUrl(source.getOriginalFileUrl()); changed = true; }
+        if (StrUtil.isBlank(target.getOriginalFilePath()) && StrUtil.isNotBlank(source.getOriginalFilePath())) { target.setOriginalFilePath(source.getOriginalFilePath()); changed = true; }
+        if (StrUtil.isBlank(target.getParseStatus()) && StrUtil.isNotBlank(source.getParseStatus())) { target.setParseStatus(source.getParseStatus()); changed = true; }
+        if (StrUtil.isBlank(target.getParseErrorMsg()) && StrUtil.isNotBlank(source.getParseErrorMsg())) { target.setParseErrorMsg(source.getParseErrorMsg()); changed = true; }
+        if (isRicherRentInfo(target.getRentInfoJson(), source.getRentInfoJson())) {
+            target.setRentInfoJson(source.getRentInfoJson());
+            changed = true;
+        }
+        if (StrUtil.length(source.getOcrRawText()) > StrUtil.length(target.getOcrRawText())) {
+            target.setOcrRawText(source.getOcrRawText());
+            changed = true;
+        }
+        return changed;
+    }
+
+    private boolean shouldReplaceFee(String target, String source) {
+        if (StrUtil.isBlank(source)) {
+            return false;
+        }
+        if (StrUtil.isBlank(target)) {
+            return true;
+        }
+        boolean sourceSpecific = source.contains("元") && (source.contains("/") || source.contains("吨")
+                || source.contains("度") || source.contains("月") || source.contains("年"));
+        if (!sourceSpecific) {
+            return false;
+        }
+        return target.contains("物业管理费") || target.contains("收取") || target.length() > source.length() + 3;
+    }
+
+    private boolean isRicherRentInfo(String targetRentInfoJson, String sourceRentInfoJson) {
+        int sourceCount = rentItemCount(sourceRentInfoJson);
+        int targetCount = rentItemCount(targetRentInfoJson);
+        if (sourceCount == 0) {
+            return false;
+        }
+        if (sourceCount > targetCount) {
+            return true;
+        }
+        if (sourceCount < targetCount) {
+            return false;
+        }
+        BigDecimal sourceMax = maxRentAmount(sourceRentInfoJson);
+        BigDecimal targetMax = maxRentAmount(targetRentInfoJson);
+        return sourceMax.compareTo(BigDecimal.ZERO) > 0
+                && sourceMax.compareTo(targetMax) > 0
+                && (targetMax.compareTo(new BigDecimal("100")) < 0
+                || sourceMax.compareTo(targetMax.multiply(new BigDecimal("2"))) > 0);
+    }
+
+    private int rentItemCount(String rentInfoJson) {
+        if (StrUtil.isBlank(rentInfoJson)) {
+            return 0;
+        }
+        try {
+            return JSONUtil.parseArray(rentInfoJson).size();
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private BigDecimal maxRentAmount(String rentInfoJson) {
+        if (StrUtil.isBlank(rentInfoJson)) {
+            return BigDecimal.ZERO;
+        }
+        try {
+            JSONArray array = JSONUtil.parseArray(rentInfoJson);
+            BigDecimal max = BigDecimal.ZERO;
+            for (int i = 0; i < array.size(); i++) {
+                String raw = array.getJSONObject(i).getStr("rentAmount", "");
+                String numeric = raw.replace("，", ",").replace(",", "").replaceAll("[^0-9.]", "");
+                if (StrUtil.isBlank(numeric)) {
+                    continue;
+                }
+                BigDecimal amount = new BigDecimal(numeric);
+                if (amount.compareTo(max) > 0) {
+                    max = amount;
+                }
+            }
+            return max;
+        } catch (Exception ignored) {
+            return BigDecimal.ZERO;
+        }
     }
 
     @Override

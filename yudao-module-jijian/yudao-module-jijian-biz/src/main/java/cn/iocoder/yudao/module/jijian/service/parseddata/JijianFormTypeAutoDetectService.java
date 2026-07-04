@@ -103,6 +103,12 @@ public class JijianFormTypeAutoDetectService {
         if (isCanteenStrongMatch(headers)) {
             boost(scores, FormTypeConstants.CANTEEN, CANTEEN_STRONG_CONFIDENCE);
         }
+        int leaseScore = LeaseContractParseService.scoreLeaseContract(fileName,
+                StrUtil.blankToDefault(sheetName, "") + " " + String.join(" ", headers == null ? new ArrayList<>() : headers),
+                headers);
+        if (leaseScore >= 7) {
+            boost(scores, FormTypeConstants.LEASE_CONTRACT, Math.min(0.99, 0.70 + leaseScore * 0.03));
+        }
 
         // 按置信度降序排列
         scores.sort(Comparator.comparingDouble((CandidateScore c) -> c.confidence).reversed());

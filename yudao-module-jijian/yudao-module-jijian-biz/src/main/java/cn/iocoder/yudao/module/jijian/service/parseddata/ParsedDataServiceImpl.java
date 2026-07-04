@@ -1076,18 +1076,19 @@ public class ParsedDataServiceImpl implements ParsedDataService {
             return true;
         }
         if (StrUtil.isNotBlank(currentFormType) && !FormTypeConstants.LEASE_CONTRACT.equals(currentFormType)) {
-            return isPropertyFamilyFormType(currentFormType) && hasStrongLeaseContractSignals(text);
+            return isPropertyFamilyFormType(currentFormType) && hasStrongLeaseContractSignals(fname, text);
         }
-        if ((isExcel(fname) || isCsv(fname)) && !hasStrongLeaseContractSignals(text)) {
+        if ((isExcel(fname) || isCsv(fname)) && !hasStrongLeaseContractSignals(fname, text)) {
             return false;
         }
-        if (isImageOrPdf(fname) && isLikelyLeaseContractFile(fname)) {
+        if (isImageOrPdf(fname) && isLikelyLeaseContractFile(fname)
+                && LeaseContractParseService.scoreLeaseContract(fname, text, Collections.emptyList()) >= 4) {
             return true;
         }
         if (StrUtil.isBlank(text)) {
             return false;
         }
-        return hasStrongLeaseContractSignals(text);
+        return hasStrongLeaseContractSignals(fname, text);
     }
 
     private boolean isLikelyLeaseContractFile(String fn) {
@@ -1108,8 +1109,16 @@ public class ParsedDataServiceImpl implements ParsedDataService {
     }
 
     private boolean hasStrongLeaseContractSignals(String text) {
-        if (StrUtil.isBlank(text)) {
+        return hasStrongLeaseContractSignals("", text);
+    }
+
+    private boolean hasStrongLeaseContractSignals(String fileName, String text) {
+        if (StrUtil.isBlank(text) && StrUtil.isBlank(fileName)) {
             return false;
+        }
+        int contractScore = LeaseContractParseService.scoreLeaseContract(fileName, text, Collections.emptyList());
+        if (contractScore >= 7) {
+            return true;
         }
         boolean hasTitle = containsAny(text, "房屋租赁合同", "房屋出租合同", "租赁合同", "租赁合同书",
                 "租赁协议", "租赁协议书", "出租合同", "租房合同", "房屋租赁协议");

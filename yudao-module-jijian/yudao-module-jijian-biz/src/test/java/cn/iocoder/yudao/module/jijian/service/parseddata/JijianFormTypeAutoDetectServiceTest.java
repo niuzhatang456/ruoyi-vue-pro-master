@@ -76,4 +76,24 @@ class JijianFormTypeAutoDetectServiceTest {
                 "random.txt", null, Collections.emptyList());
         assertNotEquals(FormTypeConstants.CANTEEN, result.detectedFormType);
     }
+
+    @Test
+    void shouldDetectLeaseContractByContractSignals() {
+        JijianFormTypeAutoDetectService.DetectResult result = service.detect(
+                "AS20250007 综合楼出租合同.pdf", null,
+                Arrays.asList("出租方", "承租方", "租赁期限", "房屋租金", "保证金", "合同签订日期"));
+
+        assertEquals(FormTypeConstants.LEASE_CONTRACT, result.detectedFormType);
+        assertFalse(result.needsConfirmation);
+    }
+
+    @Test
+    void shouldNotLetLeaseContractStealClearTableHeaders() {
+        JijianFormTypeAutoDetectService.DetectResult result = service.detect(
+                "合同供应清单.xlsx", "Sheet1",
+                Arrays.asList("商品名称", "规格", "单位", "数量", "单价", "小计", "备注"));
+
+        assertNotEquals(FormTypeConstants.LEASE_CONTRACT, result.detectedFormType);
+        assertEquals(FormTypeConstants.CANTEEN, result.detectedFormType);
+    }
 }
